@@ -1,0 +1,11 @@
+{
+  "id": "player-vault",
+  "name": "Player Vault",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Sanitize and export your vault to a static HTML wiki for players. Strips GM-only secrets and orphan links.",
+  "author": "tescolopio",
+  "authorUrl": "https://github.com/tescolopio/Obsidian_PlayerVault",
+  "fundingUrl": "",
+  "isDesktopOnly": true
+}

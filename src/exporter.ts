@@ -26,9 +26,30 @@ export type ExportedNoteSet = Set<string>;
 /**
  * Convert a note slug to an HTML filename.
  * e.g. "My Note" → "My Note.html"
+ *
+ * The slug is sanitized to be safe as a cross-platform filename:
+ *  - path separators and invalid characters are replaced with "_"
+ *  - trailing dots/spaces (invalid on Windows) are removed
  */
 export function slugToFilename(slug: string): string {
-	return `${slug}.html`;
+	// Disallow path separators and characters invalid on Windows/macOS.
+	// Also strip control characters.
+	const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001F]/g;
+
+	let base = slug.trim().replace(INVALID_FILENAME_CHARS, "_");
+
+	// Collapse consecutive spaces/underscores to a single underscore to keep names readable.
+	base = base.replace(/[ _]+/g, "_");
+
+	// Remove trailing dots or spaces which are not allowed in Windows filenames.
+	base = base.replace(/[. ]+$/g, "");
+
+	// Fallback in case everything was stripped.
+	if (!base) {
+		base = "note";
+	}
+
+	return `${base}.html`;
 }
 
 /** Escape special HTML characters */

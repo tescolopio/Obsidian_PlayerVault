@@ -78,7 +78,7 @@ export function sanitizeContent(
  * `gm-only: true` (case-insensitive, optional spaces around the colon).
  */
 export function isNoteFullySecret(content: string): boolean {
-	const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+	const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!fmMatch) return false;
 	return /^gm-only\s*:\s*true\s*$/im.test(fmMatch[1]);
 }

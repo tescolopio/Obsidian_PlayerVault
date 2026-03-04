@@ -1,5 +1,6 @@
 import {
 	App,
+	FileSystemAdapter,
 	Notice,
 	Plugin,
 	TFile,
@@ -16,8 +17,10 @@ import {
 	markdownToHtml,
 	wrapInPage,
 	buildIndexPage,
-	ExportedNoteSet,
+	filePathToOutputName,
+	ExportedNoteMap,
 } from "./exporter";
+import { WelcomeModal } from "./onboarding";
 
 /** CSS embedded in the export output folder as styles.css */
 const EXPORT_CSS = `/* Player Vault – exported wiki styles */
@@ -113,6 +116,16 @@ export default class PlayerVaultPlugin extends Plugin {
 
 		// Settings tab
 		this.addSettingTab(new PlayerVaultSettingTab(this.app, this));
+
+		// Show the welcome wizard on first install, after the workspace is ready
+		this.app.workspace.onLayoutReady(() => {
+			if (!this.settings.hasSeenWelcome) {
+				new WelcomeModal(this.app, async () => {
+					this.settings.hasSeenWelcome = true;
+					await this.saveSettings();
+				}).open();
+			}
+		});
 	}
 
 	async loadSettings() {
@@ -137,11 +150,19 @@ export default class PlayerVaultPlugin extends Plugin {
 			new Notice("Player Vault: export complete! ✅", 4000);
 
 			if (this.settings.openAfterExport) {
-				// Use Electron shell to open the output folder
+				const { adapter } = this.app.vault;
+				if (!(adapter instanceof FileSystemAdapter)) {
+					new Notice("Player Vault: cannot open folder – not a filesystem vault.", 4000);
+					return;
+				}
 				const outputPath = normalizePath(
-					`${(this.app.vault.adapter as any).basePath}/${this.settings.outputFolder}`
+					`${adapter.getBasePath()}/${this.settings.outputFolder}`
 				);
-				(window as any).require("electron").shell.openPath(outputPath);
+				try {
+					(window as any).require("electron").shell.openPath(outputPath);
+				} catch {
+					new Notice("Player Vault: cannot open folder – Electron shell unavailable.", 4000);
+				}
 			}
 		} catch (err) {
 			notice.hide();
@@ -162,8 +183,10 @@ export default class PlayerVaultPlugin extends Plugin {
 		const allFiles = vault.getMarkdownFiles();
 
 		// ── Pass 1: determine which notes survive sanitization ─────────────
-		const survivingNotes: Map<string, { file: TFile; sanitized: string }> =
-			new Map();
+		const survivingNotes: Map<
+			string,
+			{ file: TFile; sanitized: string; outputFilename: string }
+		> = new Map();
 
 		const extraPatterns = compileExtraPatterns(
 			this.settings.extraSecretPatterns
@@ -179,14 +202,28 @@ export default class PlayerVaultPlugin extends Plugin {
 				stripAllComments: this.settings.stripAllComments,
 			});
 
-			// Use the note name (without extension) as the key
-			survivingNotes.set(file.basename, { file, sanitized });
+			// Key by full path (unique) to prevent basename collisions.
+			const outputFilename = filePathToOutputName(file.path);
+			survivingNotes.set(file.path, { file, sanitized, outputFilename });
 		}
 
-		// ── Build the exported-note set (lower-cased) ──────────────────────
-		const exportedNoteSet: ExportedNoteSet = new Set(
-			Array.from(survivingNotes.keys()).map((n) => n.toLowerCase())
-		);
+		// ── Build the exported-note map (lowercase basename → output filename) ──
+		// Wiki-links reference notes by basename, so we map basename → filename.
+		// When two notes share a basename the first encountered wins; both notes
+		// are still exported, but wiki-links will only resolve to one of them.
+		const exportedNoteMap: ExportedNoteMap = new Map();
+		for (const { file, outputFilename } of survivingNotes.values()) {
+			const key = file.basename.toLowerCase();
+			if (exportedNoteMap.has(key)) {
+				console.warn(
+					`Player Vault: basename collision – "${file.path}" shares basename ` +
+					`"${file.basename}" with another note. Wiki-links to this basename ` +
+					`will resolve to the first-encountered note.`
+				);
+			} else {
+				exportedNoteMap.set(key, outputFilename);
+			}
+		}
 
 		// ── Ensure output folder exists ────────────────────────────────────
 		if (!(await vault.adapter.exists(outputFolder))) {
@@ -194,20 +231,20 @@ export default class PlayerVaultPlugin extends Plugin {
 		}
 
 		// ── Pass 2: convert each note to HTML and write ────────────────────
-		const sortedNames: string[] = [];
+		const indexEntries: Array<{ name: string; filename: string }> = [];
 
-		for (const [name, { sanitized }] of survivingNotes) {
-			const htmlBody = markdownToHtml(sanitized, exportedNoteSet);
-			const fullPage = wrapInPage(name, htmlBody);
-			const outPath = normalizePath(`${outputFolder}/${name}.html`);
+		for (const [, { file, sanitized, outputFilename }] of survivingNotes) {
+			const htmlBody = markdownToHtml(sanitized, exportedNoteMap);
+			const fullPage = wrapInPage(file.basename, htmlBody);
+			const outPath = normalizePath(`${outputFolder}/${outputFilename}`);
 			await vault.adapter.write(outPath, fullPage);
-			sortedNames.push(name);
+			indexEntries.push({ name: file.basename, filename: outputFilename });
 		}
 
-		sortedNames.sort((a, b) => a.localeCompare(b));
+		indexEntries.sort((a, b) => a.name.localeCompare(b.name));
 
-		// ── Write index page ───────────────────────────────────────────────
-		const indexHtml = buildIndexPage(sortedNames);
+		// ── Write index page ────────────────────────────────────────────────────
+		const indexHtml = buildIndexPage(indexEntries);
 		await vault.adapter.write(
 			normalizePath(`${outputFolder}/index.html`),
 			indexHtml

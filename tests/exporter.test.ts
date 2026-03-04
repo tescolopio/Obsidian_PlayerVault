@@ -4,16 +4,18 @@ import {
 	wrapInPage,
 	buildIndexPage,
 	slugToFilename,
-	ExportedNoteSet,
+	filePathToOutputName,
+	ExportedNoteMap,
 } from "../src/exporter";
 
-// Helper: a set containing a few exported notes
-const notes = (names: string[]): ExportedNoteSet =>
-	new Set(names.map((n) => n.toLowerCase()));
+// Helper: build an ExportedNoteMap from a list of bare note names.
+// Each name becomes a key (lower-cased) mapped to "Name.html".
+const notes = (names: string[]): ExportedNoteMap =>
+	new Map(names.map((n) => [n.toLowerCase(), `${n}.html`]));
 
 describe("slugToFilename", () => {
 	it("appends .html to the slug", () => {
-		expect(slugToFilename("My Note")).toBe("My Note.html");
+		expect(slugToFilename("My Note")).toBe("My_Note.html");
 		expect(slugToFilename("dragon")).toBe("dragon.html");
 	});
 });
@@ -59,9 +61,42 @@ describe("convertInline", () => {
 		expect(html).toContain('<img src="dragon.png" alt="dragon">');
 	});
 
-	it("escapes HTML in link targets", () => {
-		const html = convertInline('[xss](<script>)', exported);
+	it("strips disallowed link schemes to plain text", () => {
+		const html = convertInline("[xss](<script>)", exported);
 		expect(html).not.toContain("<script>");
+		expect(html).toContain("xss");
+	});
+
+	it("strips javascript: links to plain text", () => {
+		const html = convertInline("[click](javascript:alert(1))", exported);
+		expect(html).not.toContain("javascript:");
+		expect(html).toContain("click");
+	});
+
+	it("strips data: image src to plain text", () => {
+		const html = convertInline("![img](data:text/html,<h1>hi</h1>)", exported);
+		expect(html).not.toContain("data:");
+		expect(html).not.toContain("<h1>");
+	});
+
+	it("escapes raw HTML in plain text", () => {
+		const html = convertInline("<script>alert(1)</script>", exported);
+		expect(html).not.toContain("<script>");
+		expect(html).toContain("&lt;script&gt;");
+	});
+
+	it("escapes HTML inside bold formatting", () => {
+		const html = convertInline("**<evil>**", exported);
+		expect(html).not.toContain("<evil>");
+		expect(html).toContain("&lt;evil&gt;");
+		expect(html).toContain("<strong>");
+	});
+
+	it("escapes HTML inside inline code", () => {
+		const html = convertInline("`<script>`", exported);
+		expect(html).not.toContain("<script>");
+		expect(html).toContain("&lt;script&gt;");
+		expect(html).toContain("<code>");
 	});
 });
 
@@ -139,7 +174,11 @@ describe("wrapInPage", () => {
 
 describe("buildIndexPage", () => {
 	it("lists all note names as links", () => {
-		const html = buildIndexPage(["Alpha", "Beta", "Gamma"]);
+		const html = buildIndexPage([
+			{ name: "Alpha", filename: "Alpha.html" },
+			{ name: "Beta", filename: "Beta.html" },
+			{ name: "Gamma", filename: "Gamma.html" },
+		]);
 		expect(html).toContain("Alpha.html");
 		expect(html).toContain("Beta.html");
 		expect(html).toContain("Gamma.html");
@@ -147,9 +186,34 @@ describe("buildIndexPage", () => {
 		expect(html).toContain(">Beta<");
 	});
 
-	it("escapes special characters in note names", () => {
-		const html = buildIndexPage(['<script>"evil"</script>']);
+	it("escapes special characters in note names and filenames", () => {
+		const html = buildIndexPage([
+			{ name: '<script>"evil"</script>', filename: "safe_name.html" },
+		]);
 		expect(html).not.toContain("<script>");
 		expect(html).toContain("&lt;script&gt;");
+		expect(html).toContain("safe_name.html");
+	});
+});
+
+describe("filePathToOutputName", () => {
+	it("strips .md and appends .html", () => {
+		expect(filePathToOutputName("dragon.md")).toBe("dragon.html");
+	});
+
+	it("replaces path separators with underscores", () => {
+		expect(filePathToOutputName("Characters/Lyra.md")).toBe("Characters_Lyra.html");
+	});
+
+	it("handles nested paths", () => {
+		expect(filePathToOutputName("World/Locations/Tavern.md")).toBe(
+			"World_Locations_Tavern.html"
+		);
+	});
+
+	it("produces distinct filenames for notes that share a basename", () => {
+		const a = filePathToOutputName("Characters/Lyra.md");
+		const b = filePathToOutputName("NPCs/Lyra.md");
+		expect(a).not.toBe(b);
 	});
 });

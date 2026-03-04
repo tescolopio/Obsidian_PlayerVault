@@ -20,8 +20,48 @@
  *  - Paragraphs
  */
 
-/** Set of exported note base-names (without extension, lower-cased) */
-export type ExportedNoteSet = Set<string>;
+/**
+ * Map of exported notes used for wiki-link resolution.
+ * Key:   lower-cased note basename (without extension)
+ * Value: output HTML filename (e.g. "Characters_Lyra.html")
+ */
+export type ExportedNoteMap = Map<string, string>;
+
+/**
+ * Derive a safe, unique output filename from a vault file path.
+ * Path separators and characters that are invalid in filenames are replaced
+ * with "_", so notes in sub-folders produce distinct, collision-free filenames.
+ * e.g. "Characters/Lyra.md" → "Characters_Lyra.html"
+ */
+export function filePathToOutputName(filePath: string): string {
+	const INVALID = /[<>:"/\\|?*\u0000-\u001F]/g;
+	const withoutExt = filePath.replace(/\.md$/i, "");
+	let base = withoutExt.trim().replace(INVALID, "_");
+	base = base.replace(/[ _]+/g, "_");
+	base = base.replace(/[. ]+$/g, "");
+	if (!base) base = "note";
+	return `${base}.html`;
+}
+
+/**
+ * Returns true when the URL is safe to emit into an href or src attribute.
+ *
+ * Relative URLs (those lacking a scheme) are always considered safe — they
+ * resolve within the exported wiki and cannot load arbitrary code.
+ * For absolute URLs the scheme must be http, https, or mailto.
+ * Everything else (javascript:, data:, vbscript:, etc.) is disallowed.
+ */
+function isSafeUrl(url: string): boolean {
+	const trimmed = url.trim();
+	// Detect whether the URL carries a scheme: the colon must come before
+	// the first path separator, query character, or fragment.
+	const colonIdx = trimmed.indexOf(":");
+	const firstDelim = trimmed.search(/[/?#]/);
+	const hasScheme =
+		colonIdx !== -1 && (firstDelim === -1 || colonIdx < firstDelim);
+	if (!hasScheme) return true; // relative URL – always safe
+	return /^(https?:|mailto:)/i.test(trimmed);
+}
 
 /**
  * Convert a note slug to an HTML filename.
@@ -63,50 +103,90 @@ function escapeHtml(text: string): string {
 
 /**
  * Convert inline Markdown syntax to HTML within a single line of text.
+ *
+ * XSS-safety strategy:
+ *  1. Structured patterns (images, links, wiki-links, inline code) are matched
+ *     first and converted to safe HTML fragments stored in placeholder slots.
+ *  2. The remaining raw text is HTML-escaped, so stray tags like <script> can
+ *     never survive into the output.
+ *  3. Bold/italic regexes then run over the fully-escaped text, so their
+ *     capture groups can never contain unescaped HTML.
+ *  4. Placeholder slots are substituted back with the pre-built HTML fragments.
+ *
+ * Only http/https/mailto, fragment (#), and relative URLs are permitted in
+ * href/src attributes; disallowed schemes (javascript:, data:, …) cause the
+ * link/image to degrade to escaped plain text.
+ *
  * Wiki-links that point to notes absent from `exportedNotes` are rendered
  * as plain text (the link is dropped).
  */
 export function convertInline(
 	text: string,
-	exportedNotes: ExportedNoteSet
+	exportedNotes: ExportedNoteMap
 ): string {
-	// Images ![alt](src)
+	// Slot storage for safe HTML fragments extracted before HTML-escaping.
+	const slots: string[] = [];
+	const ph = (html: string): string => {
+		const idx = slots.length;
+		slots.push(html);
+		return `\x02${idx}\x03`;
+	};
+
+	// ── Images ![alt](src) ────────────────────────────────────────────────
 	text = text.replace(
 		/!\[([^\]]*)\]\(([^)]+)\)/g,
-		(_, alt, src) => `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`
+		(_, alt, src) =>
+			ph(
+				isSafeUrl(src)
+					? `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`
+					: escapeHtml(alt)
+			)
 	);
 
-	// Markdown links [text](url)
+	// ── Markdown links [text](url) ────────────────────────────────────────
 	text = text.replace(
 		/\[([^\]]+)\]\(([^)]+)\)/g,
 		(_, label, href) =>
-			`<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+			ph(
+				isSafeUrl(href)
+					? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+					: escapeHtml(label)
+			)
 	);
 
-	// Wiki links with alias [[Note|Alias]] or plain [[Note]]
+	// ── Wiki links [[Note|Alias]] or [[Note]] ─────────────────────────────
 	text = text.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, alias) => {
 		const label = alias ? alias.trim() : target.trim();
 		const key = target.trim().toLowerCase();
-		if (exportedNotes.has(key)) {
-			return `<a href="${escapeHtml(slugToFilename(target.trim()))}">${escapeHtml(label)}</a>`;
+		const outFile = exportedNotes.get(key);
+		if (outFile) {
+			return ph(`<a href="${escapeHtml(outFile)}">${escapeHtml(label)}</a>`);
 		}
 		// Orphan link – render as plain text
-		return escapeHtml(label);
+		return ph(escapeHtml(label));
 	});
 
-	// Bold + italic ***text***
+	// ── Inline code `code` ────────────────────────────────────────────────
+	// Extracted before escapeHtml so the backtick syntax still matches and
+	// the code content is individually escaped.
+	text = text.replace(/`([^`]+)`/g, (_, code) => ph(`<code>${escapeHtml(code)}</code>`));
+
+	// ── Escape remaining raw text ─────────────────────────────────────────
+	text = escapeHtml(text);
+
+	// ── Bold + italic ***text*** ──────────────────────────────────────────
 	text = text.replace(/\*{3}(.+?)\*{3}/g, "<strong><em>$1</em></strong>");
 
-	// Bold **text** or __text__
+	// ── Bold **text** or __text__ ─────────────────────────────────────────
 	text = text.replace(/\*{2}(.+?)\*{2}/g, "<strong>$1</strong>");
 	text = text.replace(/_{2}(.+?)_{2}/g, "<strong>$1</strong>");
 
-	// Italic *text* or _text_
+	// ── Italic *text* or _text_ ───────────────────────────────────────────
 	text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
 	text = text.replace(/_(.+?)_/g, "<em>$1</em>");
 
-	// Inline code `code`
-	text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+	// ── Re-insert extracted HTML fragments ────────────────────────────────
+	text = text.replace(/\x02(\d+)\x03/g, (_, i) => slots[+i]);
 
 	return text;
 }
@@ -120,7 +200,7 @@ export function convertInline(
  */
 export function markdownToHtml(
 	markdown: string,
-	exportedNotes: ExportedNoteSet
+	exportedNotes: ExportedNoteMap
 ): string {
 	const lines = markdown.split("\n");
 	const htmlParts: string[] = [];
@@ -302,14 +382,18 @@ export function wrapInPage(title: string, body: string, cssPath = "styles.css"):
 /**
  * Build the index page that lists all exported notes.
  *
- * @param noteNames  Sorted array of note names (without .html extension)
- * @param cssPath    Optional relative path to a CSS stylesheet
+ * @param notes    Sorted array of `{name, filename}` pairs – `name` is the
+ *                 display label, `filename` is the relative HTML file to link to.
+ * @param cssPath  Optional relative path to a CSS stylesheet
  */
-export function buildIndexPage(noteNames: string[], cssPath = "styles.css"): string {
-	const items = noteNames
+export function buildIndexPage(
+	notes: Array<{ name: string; filename: string }>,
+	cssPath = "styles.css"
+): string {
+	const items = notes
 		.map(
-			(name) =>
-				`    <li><a href="${escapeHtml(slugToFilename(name))}">${escapeHtml(name)}</a></li>`
+			({ name, filename }) =>
+				`    <li><a href="${escapeHtml(filename)}">${escapeHtml(name)}</a></li>`
 		)
 		.join("\n");
 

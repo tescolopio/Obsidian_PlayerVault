@@ -514,3 +514,28 @@
     color: var(--text-muted);
     text-align: right;
 }
+
+/* ── v1.3 — Custom CSS textarea (Appearance section) ─────────────────────── */
+
+.pv-custom-css-wrap {
+    margin-top: 0.5rem;
+}
+
+.pv-custom-css-input {
+    width: 100%;
+    font-family: "Courier New", monospace;
+    font-size: 0.82rem;
+    background: var(--background-modifier-form-field);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 0.5rem;
+    resize: vertical;
+    min-height: 100px;
+    box-sizing: border-box;
+}
+
+.pv-custom-css-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}

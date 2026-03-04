@@ -6,6 +6,11 @@ import {
 	slugToFilename,
 	filePathToOutputName,
 	ExportedNoteMap,
+	buildBackLinksMap,
+	buildSidebarEntries,
+	buildSearchIndexJs,
+	SidebarEntry,
+	SearchEntry,
 } from "../src/exporter";
 
 // Helper: build an ExportedNoteMap from a list of bare note names.
@@ -237,7 +242,8 @@ describe("buildIndexPage", () => {
 		const html = buildIndexPage([
 			{ name: '<script>"evil"</script>', filename: "safe_name.html" },
 		]);
-		expect(html).not.toContain("<script>");
+		// The raw XSS payload must not appear verbatim (note: page itself has <script> tags for search)
+		expect(html).not.toContain('<script>"evil"</script>');
 		expect(html).toContain("&lt;script&gt;");
 		expect(html).toContain("safe_name.html");
 	});
@@ -262,5 +268,116 @@ describe("filePathToOutputName", () => {
 		const a = filePathToOutputName("Characters/Lyra.md");
 		const b = filePathToOutputName("NPCs/Lyra.md");
 		expect(a).not.toBe(b);
+	});
+});
+
+// ── v1.3 helpers ──────────────────────────────────────────────────────────────
+
+/** Minimal duck-type entry matching the SurvivingEntry shape in exporter.ts */
+const mkEntry = (path: string, sanitized = "") => ({
+	file: { basename: path.split("/").pop()!.replace(/\.md$/i, ""), path },
+	sanitized,
+	outputFilename: filePathToOutputName(path),
+});
+
+describe("buildBackLinksMap", () => {
+	it("returns an empty map when there are no notes", () => {
+		const map = buildBackLinksMap(new Map(), new Map());
+		expect(map.size).toBe(0);
+	});
+
+	it("records a back-link when note B links to note A", () => {
+		const noteA = mkEntry("Alpha.md");
+		const noteB = mkEntry("Beta.md", "See [[Alpha]] for details.");
+		const survivingNotes = new Map([
+			["Alpha.md", noteA],
+			["Beta.md", noteB],
+		]);
+		const exportedNoteMap: ExportedNoteMap = new Map([
+			["alpha", filePathToOutputName("Alpha.md")],
+			["beta", filePathToOutputName("Beta.md")],
+		]);
+		const result = buildBackLinksMap(survivingNotes, exportedNoteMap);
+		const linksToAlpha = result.get(filePathToOutputName("Alpha.md"));
+		expect(linksToAlpha).toBeDefined();
+		expect(linksToAlpha!.length).toBe(1);
+		expect(linksToAlpha![0].name).toBe("Beta");
+	});
+
+	it("does not record self-links", () => {
+		const noteA = mkEntry("Alpha.md", "Reference: [[Alpha]].");
+		const survivingNotes = new Map([["Alpha.md", noteA]]);
+		const exportedNoteMap: ExportedNoteMap = new Map([["alpha", filePathToOutputName("Alpha.md")]]);
+		const result = buildBackLinksMap(survivingNotes, exportedNoteMap);
+		expect(result.size).toBe(0);
+	});
+});
+
+describe("buildSidebarEntries", () => {
+	it("assigns folder=\"\" for root-level notes", () => {
+		const map = new Map([["note.md", mkEntry("note.md")]]);
+		const entries = buildSidebarEntries(map);
+		expect(entries.length).toBe(1);
+		expect(entries[0].folder).toBe("");
+	});
+
+	it("assigns the parent path as folder for sub-folder notes", () => {
+		const map = new Map([
+			["root.md", mkEntry("root.md")],
+			["Characters/Lyra.md", mkEntry("Characters/Lyra.md")],
+		]);
+		const entries = buildSidebarEntries(map);
+		const lyra = entries.find((e) => e.name === "Lyra");
+		expect(lyra).toBeDefined();
+		expect(lyra!.folder).toBe("Characters");
+		// root notes sort before folder notes
+		expect(entries[0].folder).toBe("");
+	});
+});
+
+describe("buildSearchIndexJs", () => {
+	it("produces a JavaScript variable assignment", () => {
+		const result = buildSearchIndexJs([{ name: "Lyra", filename: "Lyra.html", text: "elf ranger" }]);
+		expect(result).toMatch(/^window\.PV_SEARCH_INDEX\s*=/);
+		expect(result).toContain("Lyra");
+	});
+
+	it("escapes < and > to prevent injection", () => {
+		const result = buildSearchIndexJs([{ name: "<script>", filename: "x.html", text: ">" }]);
+		expect(result).not.toContain("<script>");
+		expect(result).toContain("\\u003c");
+	});
+});
+
+describe("wrapInPage with v1.3 options", () => {
+	const sidebar: SidebarEntry[] = [
+		{ name: "Alpha", filename: "Alpha.html", folder: "" },
+		{ name: "Beta", filename: "Beta.html", folder: "Characters" },
+	];
+
+	it("includes sidebar note links in the output", () => {
+		const html = wrapInPage("Test", "<p>body</p>", { sidebarEntries: sidebar });
+		expect(html).toContain("Alpha.html");
+		expect(html).toContain("Beta.html");
+	});
+
+	it("includes breadcrumb when vaultPath is supplied", () => {
+		const html = wrapInPage("Lyra", "<p/>", { vaultPath: "Characters/Lyra.md" });
+		expect(html).toContain("pv-breadcrumb");
+		expect(html).toContain("Characters");
+	});
+
+	it("includes back-links footer when backLinks are supplied", () => {
+		const html = wrapInPage("Target", "<p/>", {
+			backLinks: [{ name: "Source", filename: "Source.html" }],
+		});
+		expect(html).toContain("pv-backlinks");
+		expect(html).toContain("Source.html");
+	});
+
+	it("injects custom CSS inside a <style> block", () => {
+		const html = wrapInPage("T", "<p/>", { customCss: "body { color: red; }" });
+		expect(html).toContain("<style>");
+		expect(html).toContain("color: red");
 	});
 });

@@ -19,6 +19,8 @@ export interface ExportProfile {
 	extraSecretPatterns: string[];
 	/** Strip ALL %% … %% blocks, not just %%SECRET%%/%%GM%% ones */
 	stripAllComments: boolean;
+	/** Extra CSS appended to the exported styles.css for this profile */
+	customCss: string;
 }
 
 /** Settings persisted in data.json */
@@ -39,6 +41,7 @@ export const DEFAULT_PROFILE: ExportProfile = {
 	inclusionTag: "",
 	extraSecretPatterns: [],
 	stripAllComments: false,
+	customCss: "",
 };
 
 export const DEFAULT_SETTINGS: PlayerVaultSettings = {
@@ -270,6 +273,28 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 		});
 		this.patternManagerEl = containerEl.createEl("div", { cls: "pv-pattern-manager" });
 		this.renderPatternManager();
+
+		// ══════════════════════════════════════════════════════════════════
+		// Section: Appearance
+		// ══════════════════════════════════════════════════════════════════
+		this.sectionHeader(containerEl, "Appearance", "palette");
+
+		const cssLabel = containerEl.createEl("div", { cls: "pv-pattern-label" });
+		cssLabel.createEl("span", { cls: "pv-pattern-label-name", text: "Custom CSS" });
+		cssLabel.createEl("span", {
+			cls: "pv-pattern-label-desc",
+			text: "Extra CSS appended to the exported stylesheet. Use this to override colours, fonts, or add your own styles.",
+		});
+		const cssWrap = containerEl.createEl("div", { cls: "pv-custom-css-wrap" });
+		const cssArea = cssWrap.createEl("textarea", {
+			cls: "pv-custom-css-input",
+			attr: { placeholder: "/* e.g. body { font-family: sans-serif; } */", rows: "6", spellcheck: "false" },
+		}) as HTMLTextAreaElement;
+		cssArea.value = profile.customCss;
+		cssArea.addEventListener("input", async () => {
+			profile.customCss = cssArea.value;
+			await this.plugin.saveSettings();
+		});
 
 		// ══════════════════════════════════════════════════════════════════
 		// Section: Help

@@ -1,7 +1,7 @@
 {
     "id": "player-vault",
     "name": "Player Vault",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "minAppVersion": "1.4.0",
     "description": "Sanitize and export your vault to a static HTML wiki for players. Strips GM-only secrets, hidden callouts, and orphan links.",
     "author": "tescolopio",

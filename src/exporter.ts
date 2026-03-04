@@ -29,6 +29,51 @@
  */
 export type ExportedNoteMap = Map<string, string>;
 
+// ── v1.3 Navigation & UX types ───────────────────────────────────────────────
+
+/** One entry in the generated sidebar, derived from a surviving note. */
+export interface SidebarEntry {
+	name: string;
+	filename: string;
+	/** Vault folder path (e.g. "Characters") or "" for root-level notes. */
+	folder: string;
+}
+
+/** A note that links to a given target note (used for the back-links footer). */
+export interface BackLinkEntry {
+	name: string;
+	filename: string;
+}
+
+/** Maps an output filename to the list of notes that link to it. */
+export type BackLinksMap = Map<string, BackLinkEntry[]>;
+
+/** Plain-text search entry written to search-index.js. */
+export interface SearchEntry {
+	name: string;
+	filename: string;
+	/** First ~500 chars of plain text, used for full-text search matching. */
+	text: string;
+}
+
+/**
+ * Options for wrapInPage and buildIndexPage (v1.3+).
+ * The third argument also accepts a bare string for backwards-compatibility
+ * (treated as `cssPath`).
+ */
+export interface WrapPageOptions {
+	/** Path to the stylesheet. Defaults to "styles.css". */
+	cssPath?: string;
+	/** Sorted sidebar entries for the navigation panel. */
+	sidebarEntries?: SidebarEntry[];
+	/** Notes that link to this page, shown in the back-links footer. */
+	backLinks?: BackLinkEntry[];
+	/** Vault-relative path of the current note (e.g. "Characters/Lyra.md"). */
+	vaultPath?: string;
+	/** Extra CSS injected as a <style> block in <head>. */
+	customCss?: string;
+}
+
 /**
  * Derive a safe, unique output filename from a vault file path.
  * Path separators and characters that are invalid in filenames are replaced
@@ -425,26 +470,114 @@ export function markdownToHtml(
 	return htmlParts.join("\n");
 }
 
+// ── Internal layout helpers (v1.3) ────────────────────────────────────────────
+
+function buildSidebarHtml(entries: SidebarEntry[], currentFilename?: string): string {
+	const rootNotes = entries.filter((e) => e.folder === "");
+	const byFolder = new Map<string, SidebarEntry[]>();
+	for (const e of entries.filter((e) => e.folder !== "")) {
+		const arr = byFolder.get(e.folder) ?? [];
+		arr.push(e);
+		byFolder.set(e.folder, arr);
+	}
+
+	let html = `<h2>Notes</h2>`;
+
+	if (rootNotes.length) {
+		html += `<ul>`;
+		for (const e of rootNotes) {
+			const active = e.filename === currentFilename ? ` class="pv-sidebar-active"` : ``;
+			html += `<li><a href="${escapeHtml(e.filename)}"${active}>${escapeHtml(e.name)}</a></li>`;
+		}
+		html += `</ul>`;
+	}
+
+	for (const [folder, folderNotes] of byFolder) {
+		html += `<details class="pv-folder-group" open><summary>${escapeHtml(folder)}</summary><ul>`;
+		for (const e of folderNotes) {
+			const active = e.filename === currentFilename ? ` class="pv-sidebar-active"` : ``;
+			html += `<li><a href="${escapeHtml(e.filename)}"${active}>${escapeHtml(e.name)}</a></li>`;
+		}
+		html += `</ul></details>`;
+	}
+
+	return html;
+}
+
+function buildBreadcrumbHtml(vaultPath: string, title: string): string {
+	const parts = vaultPath.replace(/\.md$/i, "").split("/");
+	if (parts.length <= 1) {
+		return `<nav class="pv-breadcrumb" aria-label="Breadcrumb"><a href="index.html">Home</a><span class="pv-bc-sep">›</span><span>${escapeHtml(title)}</span></nav>`;
+	}
+	const folders = parts
+		.slice(0, -1)
+		.map((f) => `<span>${escapeHtml(f)}</span>`)
+		.join(`<span class="pv-bc-sep">›</span>`);
+	return `<nav class="pv-breadcrumb" aria-label="Breadcrumb"><a href="index.html">Home</a><span class="pv-bc-sep">›</span>${folders}<span class="pv-bc-sep">›</span><span>${escapeHtml(title)}</span></nav>`;
+}
+
+function buildBackLinksHtml(backLinks: BackLinkEntry[]): string {
+	if (backLinks.length === 0) return "";
+	const items = backLinks
+		.map((b) => `<li><a href="${escapeHtml(b.filename)}">${escapeHtml(b.name)}</a></li>`)
+		.join("");
+	return `<footer class="pv-backlinks"><h3>Linked from</h3><ul>${items}</ul></footer>`;
+}
+
 /**
- * Wrap an HTML fragment in a full HTML5 page.
+ * Wrap an HTML fragment in a full HTML5 page with sidebar, breadcrumb,
+ * search bar, theme toggle, and optional custom CSS (v1.3+).
  *
- * @param title    Page title shown in the browser tab
- * @param body     Inner HTML content
- * @param cssPath  Optional relative path to a CSS stylesheet
+ * For backwards compatibility the third argument also accepts a bare string
+ * (treated as `cssPath`).
  */
-export function wrapInPage(title: string, body: string, cssPath = "styles.css"): string {
+export function wrapInPage(title: string, body: string, optsOrCss: string | WrapPageOptions = {}): string {
+	const opts: WrapPageOptions = typeof optsOrCss === "string" ? { cssPath: optsOrCss } : optsOrCss;
+	const cssPath = opts.cssPath ?? "styles.css";
+	const sidebarEntries = opts.sidebarEntries ?? [];
+	const backLinks = opts.backLinks ?? [];
+	const vaultPath = opts.vaultPath;
+	const customCss = opts.customCss ?? "";
+
+	const currentFilename = vaultPath ? filePathToOutputName(vaultPath) : undefined;
+	const sidebarHtml = buildSidebarHtml(sidebarEntries, currentFilename);
+	const breadcrumbHtml = vaultPath ? buildBreadcrumbHtml(vaultPath, title) : "";
+	const backLinksHtml = buildBackLinksHtml(backLinks);
+	const safeCss = customCss.trim().replace(/<\/style>/gi, "/* </style> */");
+	const customCssBlock = safeCss ? `\n  <style>\n${safeCss}\n  </style>` : "";
+
 	return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="${escapeHtml(cssPath)}">
+  <script>try{document.documentElement.setAttribute("data-theme",localStorage.getItem("pv-theme")||"dark")}catch(e){}</script>${customCssBlock}
 </head>
 <body>
-  <article class="note-content">
-    ${body}
-  </article>
+  <header class="pv-header">
+    <div class="pv-header-left">
+      <a href="index.html" class="pv-site-title">Player Wiki</a>${breadcrumbHtml ? `\n      ${breadcrumbHtml}` : ""}
+    </div>
+    <div class="pv-header-right">
+      <div class="pv-search-wrap">
+        <input type="search" id="pv-search" placeholder="Search notes\u2026" aria-label="Search notes">
+        <div id="pv-search-dropdown" class="pv-search-dropdown" hidden></div>
+      </div>
+      <button id="pv-theme-btn" aria-label="Toggle theme">&#x2600;</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">${sidebarHtml}</aside>
+    <main>
+      <article class="note-content">
+        ${body}
+      </article>${backLinksHtml ? `\n      ${backLinksHtml}` : ""}
+    </main>
+  </div>
+  <script src="search-index.js"></script>
+  <script src="search.js"></script>
 </body>
 </html>`;
 }
@@ -452,13 +585,12 @@ export function wrapInPage(title: string, body: string, cssPath = "styles.css"):
 /**
  * Build the index page that lists all exported notes.
  *
- * @param notes    Sorted array of `{name, filename}` pairs – `name` is the
- *                 display label, `filename` is the relative HTML file to link to.
- * @param cssPath  Optional relative path to a CSS stylesheet
+ * @param notes       Sorted array of `{name, filename}` pairs.
+ * @param optsOrCss   WrapPageOptions (v1.3+) or a bare cssPath string (legacy).
  */
 export function buildIndexPage(
 	notes: Array<{ name: string; filename: string }>,
-	cssPath = "styles.css"
+	optsOrCss: string | WrapPageOptions = {}
 ): string {
 	const items = notes
 		.map(
@@ -468,5 +600,128 @@ export function buildIndexPage(
 		.join("\n");
 
 	const body = `<h1>Player Wiki</h1>\n<ul class="note-index">\n${items}\n</ul>`;
-	return wrapInPage("Player Wiki – Index", body, cssPath);
+	return wrapInPage("Player Wiki \u2013 Index", body, optsOrCss);
 }
+
+// ── v1.3 exported helpers ─────────────────────────────────────────────────────
+
+/** Internal duck type — structurally compatible with the main.ts survivingNotes map. */
+type SurvivingEntry = { file: { basename: string; path: string }; sanitized: string; outputFilename: string };
+
+/**
+ * Build a map from each note's output filename to the list of notes that
+ * contain a wiki-link pointing to it.
+ */
+export function buildBackLinksMap(
+	survivingNotes: Map<string, SurvivingEntry>,
+	exportedNoteMap: ExportedNoteMap
+): BackLinksMap {
+	const map: BackLinksMap = new Map();
+	const linkRe = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+
+	for (const { file, sanitized, outputFilename: sourceFilename } of survivingNotes.values()) {
+		let match: RegExpExecArray | null;
+		linkRe.lastIndex = 0;
+		while ((match = linkRe.exec(sanitized)) !== null) {
+			const target = match[1].trim().toLowerCase();
+			const targetFilename = exportedNoteMap.get(target);
+			if (!targetFilename || targetFilename === sourceFilename) continue;
+			const existing = map.get(targetFilename) ?? [];
+			if (!existing.some((e) => e.filename === sourceFilename)) {
+				existing.push({ name: file.basename, filename: sourceFilename });
+				map.set(targetFilename, existing);
+			}
+		}
+	}
+	return map;
+}
+
+/**
+ * Derive sidebar entries from the surviving notes map.
+ * Root notes (no parent folder) get `folder: ""`. Sub-folder notes get the
+ * parent path as their folder (e.g. `"Characters"` or `"World/Cities"`).
+ */
+export function buildSidebarEntries(survivingNotes: Map<string, SurvivingEntry>): SidebarEntry[] {
+	return [...survivingNotes.values()]
+		.map(({ file, outputFilename }) => {
+			const parts = file.path.replace(/\.md$/i, "").split("/");
+			const folder = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+			return { name: file.basename, filename: outputFilename, folder };
+		})
+		.sort((a, b) => {
+			if (a.folder === "" && b.folder !== "") return -1;
+			if (a.folder !== "" && b.folder === "") return 1;
+			const fc = a.folder.localeCompare(b.folder);
+			return fc !== 0 ? fc : a.name.localeCompare(b.name);
+		});
+}
+
+/**
+ * Generate the contents of `search-index.js`.
+ * Sets `window.PV_SEARCH_INDEX` to an array of `{name, filename, text}` objects.
+ */
+export function buildSearchIndexJs(entries: SearchEntry[]): string {
+	const safe = JSON.stringify(entries)
+		.replace(/</g, "\\u003c")
+		.replace(/>/g, "\\u003e");
+	return `window.PV_SEARCH_INDEX = ${safe};`;
+}
+
+/**
+ * The contents of `search.js` — handles theme toggle and live search.
+ * Written as a standalone IIFE so it works on every page without any build
+ * step or module system (also works on file:// protocol).
+ */
+export const SEARCH_JS = `(function () {
+  // Theme toggle
+  var applyTheme = function (t) {
+    document.documentElement.setAttribute("data-theme", t);
+    try { localStorage.setItem("pv-theme", t); } catch (_) {}
+    var btn = document.getElementById("pv-theme-btn");
+    if (btn) btn.textContent = t === "dark" ? "\u2600" : "\u263d";
+  };
+  var stored = null;
+  try { stored = localStorage.getItem("pv-theme"); } catch (_) {}
+  applyTheme(stored || document.documentElement.getAttribute("data-theme") || "dark");
+  var themeBtn = document.getElementById("pv-theme-btn");
+  if (themeBtn) {
+    themeBtn.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      applyTheme(cur === "dark" ? "light" : "dark");
+    });
+  }
+
+  // Search
+  var input = document.getElementById("pv-search");
+  var dropdown = document.getElementById("pv-search-dropdown");
+  if (!input || !dropdown || typeof window.PV_SEARCH_INDEX === "undefined") return;
+
+  input.addEventListener("input", function () {
+    var q = this.value.trim().toLowerCase();
+    dropdown.innerHTML = "";
+    if (!q) { dropdown.hidden = true; return; }
+    var hits = window.PV_SEARCH_INDEX.filter(function (n) {
+      return n.name.toLowerCase().indexOf(q) !== -1 ||
+             n.text.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 12);
+    if (!hits.length) { dropdown.hidden = true; return; }
+    hits.forEach(function (r) {
+      var a = document.createElement("a");
+      a.href = r.filename;
+      a.className = "pv-search-result";
+      a.textContent = r.name;
+      dropdown.appendChild(a);
+    });
+    dropdown.hidden = false;
+  });
+
+  document.addEventListener("click", function (e) {
+    var wrap = document.querySelector(".pv-search-wrap");
+    if (wrap && !wrap.contains(e.target)) dropdown.hidden = true;
+  });
+
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { dropdown.hidden = true; input.value = ""; }
+  });
+}());
+`;

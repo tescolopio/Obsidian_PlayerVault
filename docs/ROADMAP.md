@@ -64,16 +64,16 @@ Focus: give the GM precise control over what goes out.
 
 ---
 
-## v1.3 — Navigation & UX 🗓
+## v1.3 — Navigation & UX ✅
 
 Focus: make the generated wiki easier to navigate.
 
-- 🗓 **Sidebar navigation** — collapsible sidebar listing all exported notes, grouped by folder
-- 🗓 **Search bar** — client-side full-text search across all exported notes (no server required)
-- 🗓 **Breadcrumb trail** — top-of-page path derived from vault folder structure
-- 🗓 **Back-links section** — "Notes that link here" footer on each page
-- 🗓 **Theme switcher** — light / dark toggle embedded in the exported HTML
-- 🗓 **Custom CSS injection** — let the user supply extra CSS that is appended to every exported page
+- ✅ **Sidebar navigation** — collapsible sidebar listing all exported notes, grouped by folder
+- ✅ **Search bar** — client-side full-text search across all exported notes (no server required)
+- ✅ **Breadcrumb trail** — top-of-page path derived from vault folder structure
+- ✅ **Back-links section** — "Notes that link here" footer on each page
+- ✅ **Theme switcher** — light / dark toggle embedded in the exported HTML
+- ✅ **Custom CSS injection** — let the user supply extra CSS that is appended to every exported page
 
 ---
 

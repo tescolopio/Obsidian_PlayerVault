@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 
 ---
 
+## [1.3.0] — 2026-03-XX
+
+### Added
+- **Sidebar navigation** — every exported page now includes a collapsible sidebar listing all exported notes. Root-level notes appear first; sub-folder notes are grouped under collapsible `<details>` elements labelled with their folder path. The current note is highlighted with a `.pv-sidebar-active` class.
+- **Breadcrumb trail** — pages located inside a sub-folder show a Home › Folder › Title breadcrumb beneath the site title in the header.
+- **Back-links footer** — if other notes wiki-link to a page, a "Linked from" footer lists them as clickable chips. Back-links are computed from `[[wiki-link]]` syntax during export.
+- **Live search bar** — a search input in the header filters notes by title and plain-text content. Results appear in a dropdown; Escape closes it. Powered by `search-index.js` + `search.js` (both written to the output folder on every export — no server required, works on `file://`).
+- **Dark/light theme switcher** — a toggle button (☀/☽) in the header switches between the dark and light themes. The choice is persisted in `localStorage`. A FOUC-prevention `<script>` in `<head>` restores the saved theme before first paint.
+- **Custom CSS per profile** — a "Appearance" section in each export profile's settings exposes a `customCss` textarea. CSS entered there is injected as a `<style>` block in every exported page's `<head>`. `</style>` sequences are escaped to prevent injection.
+
+### Changed
+- `EXPORT_CSS` rewritten with `.pv-header` class (replacing bare `header` selector), sticky header and sidebar, collapsible folder-group styles, back-links footer styles, light-theme overrides (`html[data-theme="light"] …`), and table styles for exported content.
+- `wrapInPage` signature updated to `wrapInPage(title, body, optsOrCss?: string | WrapPageOptions)`. Old `string` form (`wrapInPage(t, b, "../custom.css")`) still works unchanged.
+- `buildIndexPage` signature updated to `buildIndexPage(notes, optsOrCss?: string | WrapPageOptions)`. Old zero-options calls still work.
+- Export pipeline writes two additional files per export: `search-index.js` and `search.js`.
+
+### Tests
+- 77 tests total (up from 66).
+- Added `describe("buildBackLinksMap")` — 3 tests.
+- Added `describe("buildSidebarEntries")` — 2 tests.
+- Added `describe("buildSearchIndexJs")` — 2 tests.
+- Added `describe("wrapInPage with v1.3 options")` — 4 tests (sidebar, breadcrumb, backlinks, custom CSS).
+
+---
+
 ## [1.2.0] — 2026-03-04
 
 ### Added

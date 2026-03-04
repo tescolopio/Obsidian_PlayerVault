@@ -23,11 +23,16 @@ import {
 	buildIndexPage,
 	filePathToOutputName,
 	ExportedNoteMap,
+	buildBackLinksMap,
+	buildSidebarEntries,
+	buildSearchIndexJs,
+	SEARCH_JS,
+	SearchEntry,
 } from "./exporter";
 import { WelcomeModal } from "./onboarding";
 
 /** CSS embedded in the export output folder as styles.css */
-const EXPORT_CSS = `/* Player Vault – exported wiki styles */
+const EXPORT_CSS = `/* Player Vault – exported wiki styles (v1.3) */
 *, *::before, *::after { box-sizing: border-box; }
 body {
   font-family: Georgia, "Times New Roman", serif;
@@ -36,37 +41,123 @@ body {
   margin: 0;
   padding: 0;
 }
-header {
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+.pv-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   background: #16213e;
-  padding: 1rem 2rem;
+  padding: 0.6rem 1.5rem;
   border-bottom: 2px solid #e94560;
 }
-header h1 { margin: 0; color: #e94560; font-size: 1.4rem; }
-header nav a {
+.pv-header-left { display: flex; flex-direction: column; gap: 0.15rem; }
+.pv-header-right { display: flex; align-items: center; gap: 0.75rem; }
+.pv-site-title { color: #e94560; font-size: 1.2rem; font-weight: bold; text-decoration: none; }
+.pv-site-title:hover { text-decoration: underline; }
+
+/* ── Breadcrumb ──────────────────────────────────────────────────────── */
+.pv-breadcrumb { font-size: 0.78rem; color: #a8dadc; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.pv-breadcrumb a { color: #a8dadc; text-decoration: none; }
+.pv-breadcrumb a:hover { text-decoration: underline; }
+.pv-bc-sep { color: #e94560; user-select: none; }
+
+/* ── Search ──────────────────────────────────────────────────────────── */
+.pv-search-wrap { position: relative; }
+#pv-search {
+  background: #0f3460;
+  border: 1px solid #e94560;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+  width: 200px;
+  outline: none;
+}
+#pv-search::placeholder { color: #888; }
+.pv-search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #16213e;
+  border: 1px solid #e94560;
+  border-radius: 4px;
+  z-index: 200;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.pv-search-result {
+  display: block;
+  padding: 0.4rem 0.7rem;
   color: #a8dadc;
   text-decoration: none;
-  margin-right: 1rem;
+  font-size: 0.85rem;
 }
-header nav a:hover { text-decoration: underline; }
-.layout { display: flex; min-height: 100vh; }
+.pv-search-result:hover { background: #0f3460; }
+
+/* ── Theme toggle ────────────────────────────────────────────────────── */
+#pv-theme-btn {
+  background: transparent;
+  border: 1px solid #e94560;
+  border-radius: 4px;
+  color: #e0e0e0;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.2rem 0.5rem;
+}
+#pv-theme-btn:hover { background: #0f3460; }
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+.layout { display: flex; min-height: calc(100vh - 50px); }
 aside.sidebar {
   width: 240px;
+  min-width: 200px;
+  position: sticky;
+  top: 50px;
+  max-height: calc(100vh - 50px);
   background: #16213e;
   padding: 1rem;
   border-right: 1px solid #0f3460;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 aside.sidebar h2 { color: #e94560; font-size: 1rem; margin-top: 0; }
-aside.sidebar ul { list-style: none; padding: 0; margin: 0; }
+aside.sidebar ul { list-style: none; padding: 0; margin: 0 0 0.5rem 0; }
 aside.sidebar ul li a {
   display: block;
   padding: 0.3rem 0.5rem;
   color: #a8dadc;
   text-decoration: none;
   border-radius: 4px;
+  font-size: 0.88rem;
 }
 aside.sidebar ul li a:hover { background: #0f3460; }
+aside.sidebar ul li a.pv-sidebar-active { background: #0f3460; color: #e94560; font-weight: bold; }
+
+/* ── Collapsible folder groups ────────────────────────────────────────── */
+.pv-folder-group { margin-bottom: 0.25rem; }
+.pv-folder-group > summary {
+  cursor: pointer;
+  list-style: none;
+  color: #e94560;
+  font-size: 0.85rem;
+  font-weight: bold;
+  padding: 0.25rem 0.3rem;
+  border-radius: 3px;
+  user-select: none;
+}
+.pv-folder-group > summary:hover { background: #0f3460; }
+.pv-folder-group > summary::before { content: "\\25B6\\FE0E  "; font-size: 0.6rem; }
+.pv-folder-group[open] > summary::before { content: "\\25BC\\FE0E  "; }
+
+/* ── Main content ─────────────────────────────────────────────────────── */
 main { flex: 1; padding: 2rem; max-width: 860px; }
+
 article.note-content h1,
 article.note-content h2,
 article.note-content h3 { color: #e94560; }
@@ -92,10 +183,70 @@ article.note-content pre {
 }
 article.note-content pre code { background: none; padding: 0; }
 article.note-content hr { border: none; border-top: 1px solid #e94560; margin: 1.5rem 0; }
+
+/* ── Tables ──────────────────────────────────────────────────────────── */
+article.note-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+article.note-content th,
+article.note-content td {
+  border: 1px solid #0f3460;
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+}
+article.note-content th { background: #0f3460; color: #e94560; }
+article.note-content tr:nth-child(even) td { background: rgba(15,52,96,0.35); }
+
+/* ── Back-links footer ─────────────────────────────────────────────────── */
+.pv-backlinks {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid #0f3460;
+  font-size: 0.85rem;
+}
+.pv-backlinks h3 { color: #e94560; margin-bottom: 0.5rem; }
+.pv-backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pv-backlinks ul li a {
+  color: #a8dadc;
+  text-decoration: none;
+  background: #0f3460;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+}
+.pv-backlinks ul li a:hover { text-decoration: underline; }
+
+/* ── Index page ──────────────────────────────────────────────────────── */
 ul.note-index { list-style: none; padding: 0; }
 ul.note-index li { margin: 0.4rem 0; }
 ul.note-index li a { color: #a8dadc; text-decoration: none; }
 ul.note-index li a:hover { text-decoration: underline; }
+
+/* ── Light theme overrides ───────────────────────────────────────────── */
+html[data-theme="light"] body { background: #f5f5f5; color: #1a1a2e; }
+html[data-theme="light"] .pv-header { background: #fff; border-bottom-color: #e94560; }
+html[data-theme="light"] aside.sidebar { background: #fff; border-right-color: #ddd; }
+html[data-theme="light"] aside.sidebar ul li a { color: #1a1a2e; }
+html[data-theme="light"] aside.sidebar ul li a:hover { background: #eee; }
+html[data-theme="light"] aside.sidebar ul li a.pv-sidebar-active { background: #eee; }
+html[data-theme="light"] .pv-folder-group > summary { color: #e94560; }
+html[data-theme="light"] .pv-folder-group > summary:hover { background: #eee; }
+html[data-theme="light"] article.note-content a { color: #0050a0; }
+html[data-theme="light"] article.note-content blockquote { background: #eee; }
+html[data-theme="light"] article.note-content code { background: #eee; color: #1a1a2e; }
+html[data-theme="light"] article.note-content pre { background: #eee; color: #1a1a2e; }
+html[data-theme="light"] article.note-content th { background: #ddd; }
+html[data-theme="light"] article.note-content tr:nth-child(even) td { background: rgba(0,0,0,0.04); }
+html[data-theme="light"] #pv-search { background: #fff; border-color: #e94560; color: #1a1a2e; }
+html[data-theme="light"] .pv-search-dropdown { background: #fff; }
+html[data-theme="light"] .pv-search-result { color: #1a1a2e; }
+html[data-theme="light"] .pv-search-result:hover { background: #eee; }
+html[data-theme="light"] #pv-theme-btn { color: #1a1a2e; }
+html[data-theme="light"] #pv-theme-btn:hover { background: #eee; }
+html[data-theme="light"] .pv-backlinks ul li a { background: #eee; color: #1a1a2e; }
+html[data-theme="light"] ul.note-index li a { color: #0050a0; }
 `;
 
 /** Modal displayed while the export pipeline runs, showing a progress bar and the current note name. */
@@ -360,6 +511,20 @@ export default class PlayerVaultPlugin extends Plugin {
 			await vault.adapter.mkdir(outputFolder);
 		}
 
+		// ── Build v1.3 navigation data ─────────────────────────────────────
+		const sidebarEntries = buildSidebarEntries(survivingNotes);
+		const backLinksMap = buildBackLinksMap(survivingNotes, exportedNoteMap);
+		const searchEntries: SearchEntry[] = [...survivingNotes.values()].map(({ file, sanitized }) => ({
+			name: file.basename,
+			filename: filePathToOutputName(file.path),
+			text: sanitized
+				.replace(/%%.*?%%/gs, "")
+				.replace(/[#*_`>[\]!|]/g, "")
+				.replace(/\s+/g, " ")
+				.trim()
+				.slice(0, 500),
+		}));
+
 		// ── Pass 2: convert each note to HTML and write ────────────────────
 		const indexEntries: Array<{ name: string; filename: string }> = [];
 			let exportCount = 0;
@@ -369,7 +534,12 @@ export default class PlayerVaultPlugin extends Plugin {
 				exportCount++;
 				onProgress?.(exportCount, exportTotal, file.basename);
 			const htmlBody = markdownToHtml(sanitized, exportedNoteMap);
-			const fullPage = wrapInPage(file.basename, htmlBody);
+			const fullPage = wrapInPage(file.basename, htmlBody, {
+				sidebarEntries,
+				backLinks: backLinksMap.get(outputFilename) ?? [],
+				vaultPath: file.path,
+				customCss: profile.customCss,
+			});
 			const outPath = normalizePath(`${outputFolder}/${outputFilename}`);
 			await vault.adapter.write(outPath, fullPage);
 			indexEntries.push({ name: file.basename, filename: outputFilename });
@@ -378,16 +548,24 @@ export default class PlayerVaultPlugin extends Plugin {
 		indexEntries.sort((a, b) => a.name.localeCompare(b.name));
 
 		// ── Write index page ────────────────────────────────────────────────────
-		const indexHtml = buildIndexPage(indexEntries);
+		const indexHtml = buildIndexPage(indexEntries, { sidebarEntries, customCss: profile.customCss });
 		await vault.adapter.write(
 			normalizePath(`${outputFolder}/index.html`),
 			indexHtml
 		);
 
-		// ── Write stylesheet ───────────────────────────────────────────────
+		// ── Write stylesheet & search scripts ─────────────────────────────
 		await vault.adapter.write(
 			normalizePath(`${outputFolder}/styles.css`),
 			EXPORT_CSS
+		);
+		await vault.adapter.write(
+			normalizePath(`${outputFolder}/search-index.js`),
+			buildSearchIndexJs(searchEntries)
+		);
+		await vault.adapter.write(
+			normalizePath(`${outputFolder}/search.js`),
+			SEARCH_JS
 		);
 		// ── Write export manifest ─────────────────────────────────────
 		const manifest = {

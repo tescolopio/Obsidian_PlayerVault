@@ -1,4 +1,4 @@
-import { sanitizeContent, isNoteFullySecret, DEFAULT_SECRET_PATTERNS } from "../src/sanitizer";
+import { sanitizeContent, isNoteFullySecret, isNoteExcludedByFolder, isNoteIncludedByTag, DEFAULT_SECRET_PATTERNS } from "../src/sanitizer";
 
 describe("sanitizeContent", () => {
 	describe("%%SECRET%% blocks", () => {
@@ -129,5 +129,55 @@ describe("isNoteFullySecret", () => {
 describe("DEFAULT_SECRET_PATTERNS", () => {
 	it("exports at least two patterns", () => {
 		expect(DEFAULT_SECRET_PATTERNS.length).toBeGreaterThanOrEqual(2);
+	});
+});
+
+describe("isNoteExcludedByFolder", () => {
+	it("returns false when excluded list is empty", () => {
+		expect(isNoteExcludedByFolder("GM Notes/Session 1.md", [])).toBe(false);
+	});
+
+	it("returns true when the note path starts with an excluded folder", () => {
+		expect(isNoteExcludedByFolder("GM Notes/Session 1.md", ["GM Notes"])).toBe(true);
+	});
+
+	it("returns false when the note is in a different folder", () => {
+		expect(isNoteExcludedByFolder("Player Notes/Overview.md", ["GM Notes"])).toBe(false);
+	});
+
+	it("matches with a trailing slash on the excluded folder entry", () => {
+		expect(isNoteExcludedByFolder("GM Notes/foo.md", ["GM Notes/"])).toBe(true);
+	});
+
+	it("does not match a partial folder name without a separator", () => {
+		expect(isNoteExcludedByFolder("GM Notes Extended/note.md", ["GM Notes"])).toBe(false);
+	});
+});
+
+describe("isNoteIncludedByTag", () => {
+	it("returns true when the inclusion tag is empty (no filter)", () => {
+		expect(isNoteIncludedByTag("Some content", "")).toBe(true);
+	});
+
+	it("matches an inline hashtag in the note body", () => {
+		expect(isNoteIncludedByTag("Hello #player-facing world", "#player-facing")).toBe(true);
+	});
+
+	it("strips leading # from the tag before matching", () => {
+		expect(isNoteIncludedByTag("Hello #player-facing world", "player-facing")).toBe(true);
+	});
+
+	it("matches a tag in a YAML inline array", () => {
+		const content = "---\ntags: [player-facing, lore]\n---\nBody text";
+		expect(isNoteIncludedByTag(content, "#player-facing")).toBe(true);
+	});
+
+	it("matches a tag in a YAML list format", () => {
+		const content = "---\ntags:\n  - player-facing\n  - session\n---\nBody";
+		expect(isNoteIncludedByTag(content, "#player-facing")).toBe(true);
+	});
+
+	it("returns false when the tag is not present in the note", () => {
+		expect(isNoteIncludedByTag("No tags here at all", "#player-facing")).toBe(false);
 	});
 });

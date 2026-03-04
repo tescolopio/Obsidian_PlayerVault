@@ -9,11 +9,14 @@ import {
 } from "obsidian";
 import {
 	PlayerVaultSettings,
+	ExportProfile,
 	DEFAULT_SETTINGS,
+	DEFAULT_PROFILE,
 	PlayerVaultSettingTab,
+	getActiveProfile,
 	compileExtraPatterns,
 } from "./settings";
-import { sanitizeContent, isNoteFullySecret } from "./sanitizer";
+import { sanitizeContent, isNoteFullySecret, isNoteExcludedByFolder, isNoteIncludedByTag } from "./sanitizer";
 import {
 	markdownToHtml,
 	wrapInPage,
@@ -128,6 +131,50 @@ class ExportProgressModal extends Modal {
 	}
 }
 
+type DryRunReason = "folder" | "tag" | "gm-only";
+interface DryRunNote { name: string; path: string; exported: boolean; reason?: DryRunReason; }
+
+/** Modal that previews which notes would be exported without writing any files. */
+class DryRunModal extends Modal {
+	constructor(app: App, private notes: DryRunNote[], private profileName: string) {
+		super(app);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: `Dry Run — Profile: ${this.profileName}` });
+		const exported = this.notes.filter((n) => n.exported);
+		const excluded = this.notes.filter((n) => !n.exported);
+		contentEl.createEl("p", { text: `✅ ${exported.length} notes would be exported` });
+		contentEl.createEl("p", { text: `❌ ${excluded.length} notes would be excluded` });
+
+		if (excluded.length > 0) {
+			contentEl.createEl("h3", { text: "Excluded notes" });
+			const ul = contentEl.createEl("ul");
+			const REASON_LABEL: Record<DryRunReason, string> = {
+				"gm-only": "GM-only content",
+				"folder": "excluded folder",
+				"tag": "missing inclusion tag",
+			};
+			for (const n of excluded) {
+				const label = n.reason ? ` (${REASON_LABEL[n.reason]})` : "";
+				ul.createEl("li", { text: `${n.name}${label}` });
+			}
+		}
+
+		if (exported.length > 0) {
+			contentEl.createEl("h3", { text: "Notes to export" });
+			const ul2 = contentEl.createEl("ul");
+			for (const n of exported) ul2.createEl("li", { text: n.name });
+		}
+
+		contentEl.createEl("button", { text: "Close", cls: "mod-cta" }).addEventListener("click", () => this.close());
+	}
+
+	onClose() { this.contentEl.empty(); }
+}
+
 export default class PlayerVaultPlugin extends Plugin {
 	settings!: PlayerVaultSettings;
 
@@ -139,13 +186,17 @@ export default class PlayerVaultPlugin extends Plugin {
 			this.runExport();
 		});
 
-		// Command palette command
+		// Command palette commands
 		this.addCommand({
 			id: "export-player-vault",
 			name: "Export Player Vault to HTML",
-			callback: () => {
-				this.runExport();
-			},
+			callback: () => { this.runExport(); },
+		});
+
+		this.addCommand({
+			id: "dry-run-export",
+			name: "Player Vault: Dry Run (preview export)",
+			callback: () => { this.runDryRun(); },
 		});
 
 		// Settings tab
@@ -163,11 +214,24 @@ export default class PlayerVaultPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
+		const data = await this.loadData();
+		if (data && !data.profiles) {
+			// Migrate from v1.1 flat settings to profile-based v1.2
+			const legacyProfile: ExportProfile = {
+				...DEFAULT_PROFILE,
+				outputFolder: data.outputFolder ?? DEFAULT_PROFILE.outputFolder,
+				extraSecretPatterns: data.extraSecretPatterns ?? [],
+				stripAllComments: data.stripAllComments ?? false,
+			};
+			this.settings = {
+				profiles: [legacyProfile],
+				activeProfileId: legacyProfile.id,
+				openAfterExport: data.openAfterExport ?? false,
+				hasSeenWelcome: data.hasSeenWelcome ?? false,
+			};
+		} else {
+			this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+		}
 	}
 
 	async saveSettings() {
@@ -176,6 +240,7 @@ export default class PlayerVaultPlugin extends Plugin {
 
 	/** Main export pipeline */
 	async runExport() {
+		const profile = getActiveProfile(this.settings);
 		const progress = new ExportProgressModal(this.app);
 		progress.open();
 
@@ -193,7 +258,7 @@ export default class PlayerVaultPlugin extends Plugin {
 					return;
 				}
 				const outputPath = normalizePath(
-					`${adapter.getBasePath()}/${this.settings.outputFolder}`
+					`${adapter.getBasePath()}/${profile.outputFolder}`
 				);
 				try {
 					(window as any).require("electron").shell.openPath(outputPath);
@@ -211,35 +276,63 @@ export default class PlayerVaultPlugin extends Plugin {
 		}
 	}
 
+	/** Dry-run: preview which notes would be exported without writing files. */
+	async runDryRun() {
+		const profile = getActiveProfile(this.settings);
+		const { vault } = this.app;
+		const allFiles = vault.getMarkdownFiles();
+		const extraPatterns = compileExtraPatterns(profile.extraSecretPatterns);
+		const results: DryRunNote[] = [];
+
+		for (const file of allFiles) {
+			const raw = await vault.read(file);
+			if (isNoteFullySecret(raw)) {
+				results.push({ name: file.basename, path: file.path, exported: false, reason: "gm-only" });
+				continue;
+			}
+			if (isNoteExcludedByFolder(file.path, profile.excludedFolders)) {
+				results.push({ name: file.basename, path: file.path, exported: false, reason: "folder" });
+				continue;
+			}
+			if (!isNoteIncludedByTag(raw, profile.inclusionTag)) {
+				results.push({ name: file.basename, path: file.path, exported: false, reason: "tag" });
+				continue;
+			}
+			results.push({ name: file.basename, path: file.path, exported: true });
+		}
+
+		new DryRunModal(this.app, results, profile.name).open();
+	}
+
 	/** Full vault export implementation */
 	async exportVault(onProgress?: (current: number, total: number, name: string) => void) {
 		const { vault } = this.app;
-		const outputFolder = normalizePath(this.settings.outputFolder);
+		const profile = getActiveProfile(this.settings);
+		const outputFolder = normalizePath(profile.outputFolder);
 
 		// Gather all markdown files
 		const allFiles = vault.getMarkdownFiles();
 
-		// ── Pass 1: determine which notes survive sanitization ─────────────
+		// ── Pass 1: determine which notes survive ────────────────────────────
 		const survivingNotes: Map<
 			string,
 			{ file: TFile; sanitized: string; outputFilename: string }
 		> = new Map();
 
-		const extraPatterns = compileExtraPatterns(
-			this.settings.extraSecretPatterns
-		);
+		const extraPatterns = compileExtraPatterns(profile.extraSecretPatterns);
 
 		for (const file of allFiles) {
 			const raw = await vault.read(file);
 
 			if (isNoteFullySecret(raw)) continue;
+			if (isNoteExcludedByFolder(file.path, profile.excludedFolders)) continue;
+			if (!isNoteIncludedByTag(raw, profile.inclusionTag)) continue;
 
 			const sanitized = sanitizeContent(raw, {
 				extraPatterns,
-				stripAllComments: this.settings.stripAllComments,
+				stripAllComments: profile.stripAllComments,
 			});
 
-			// Key by full path (unique) to prevent basename collisions.
 			const outputFilename = filePathToOutputName(file.path);
 			survivingNotes.set(file.path, { file, sanitized, outputFilename });
 		}
@@ -296,5 +389,19 @@ export default class PlayerVaultPlugin extends Plugin {
 			normalizePath(`${outputFolder}/styles.css`),
 			EXPORT_CSS
 		);
-	}
+		// ── Write export manifest ─────────────────────────────────────
+		const manifest = {
+			exportedAt: new Date().toISOString(),
+			profile: profile.name,
+			noteCount: indexEntries.length,
+			notes: indexEntries.map((e) => ({
+				name: e.name,
+				filename: e.filename,
+				path: [...survivingNotes.values()].find((v) => v.outputFilename === e.filename)?.file.path ?? "",
+			})),
+		};
+		await vault.adapter.write(
+			normalizePath(`${outputFolder}/_export-manifest.json`),
+			JSON.stringify(manifest, null, "	")
+		);	}
 }

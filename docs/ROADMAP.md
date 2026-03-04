@@ -52,15 +52,15 @@ Focus: richer HTML output and better export ergonomics.
 
 ---
 
-## v1.2 — Selective Export 🗓
+## v1.2 — Selective Export ✅
 
 Focus: give the GM precise control over what goes out.
 
-- 🗓 **Folder-level exclusion** — mark an entire folder as GM-only via a config entry
-- 🗓 **Tag-based inclusion** — only export notes carrying a specified Obsidian tag (e.g. `#player-facing`)
-- 🗓 **Dry-run mode** — show which notes will be exported/excluded before writing anything
-- 🗓 **Export manifest** — write a `manifest.json` alongside HTML listing export metadata (timestamp, vault path, note count)
-- 🗓 **Per-export profiles** — save and switch between named export configurations (e.g. "Campaign A players", "Session 0 intro")
+- ✅ **Folder-level exclusion** — mark an entire folder as GM-only via a config entry
+- ✅ **Tag-based inclusion** — only export notes carrying a specified Obsidian tag (e.g. `#player-facing`)
+- ✅ **Dry-run mode** — show which notes will be exported/excluded before writing anything
+- ✅ **Export manifest** — write a `_export-manifest.json` alongside HTML listing export metadata (timestamp, profile name, note count)
+- ✅ **Per-export profiles** — save and switch between named export configurations (e.g. "Campaign A players", "Session 0 intro")
 
 ---
 

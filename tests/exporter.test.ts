@@ -98,6 +98,18 @@ describe("convertInline", () => {
 		expect(html).toContain("&lt;script&gt;");
 		expect(html).toContain("<code>");
 	});
+
+	it("converts strikethrough", () => {
+		const html = convertInline("~~deleted~~", exported);
+		expect(html).toBe("<s>deleted</s>");
+	});
+
+	it("escapes HTML inside strikethrough", () => {
+		const html = convertInline("~~<evil>~~", exported);
+		expect(html).not.toContain("<evil>");
+		expect(html).toContain("&lt;evil&gt;");
+		expect(html).toContain("<s>");
+	});
 });
 
 describe("markdownToHtml", () => {
@@ -109,9 +121,15 @@ describe("markdownToHtml", () => {
 	});
 
 	it("converts headings", () => {
-		expect(markdownToHtml("# H1", exported)).toContain("<h1>H1</h1>");
-		expect(markdownToHtml("## H2", exported)).toContain("<h2>H2</h2>");
-		expect(markdownToHtml("### H3", exported)).toContain("<h3>H3</h3>");
+		expect(markdownToHtml("# H1", exported)).toContain(">H1</h1>");
+		expect(markdownToHtml("## H2", exported)).toContain(">H2</h2>");
+		expect(markdownToHtml("### H3", exported)).toContain(">H3</h3>");
+	});
+
+	it("gives headings id anchors derived from text", () => {
+		expect(markdownToHtml("## My Section", exported)).toContain('id="my-section"');
+		expect(markdownToHtml("# Hello World", exported)).toContain('id="hello-world"');
+		expect(markdownToHtml("### Combat & Tactics!", exported)).toContain('id="combat-tactics"');
 	});
 
 	it("converts unordered lists", () => {
@@ -154,6 +172,35 @@ describe("markdownToHtml", () => {
 	it("renders exported wiki links as anchors", () => {
 		const html = markdownToHtml("See [[Page]]", exported);
 		expect(html).toContain('<a href="Page.html">Page</a>');
+	});
+
+	it("converts a GFM pipe table with header row", () => {
+		const md = "| Name | Role |\n|------|------|\n| Lyra | Ranger |";
+		const html = markdownToHtml(md, exported);
+		expect(html).toContain("<table>");
+		expect(html).toContain("<thead>");
+		expect(html).toContain("<th>");
+		expect(html).toContain("Name");
+		expect(html).toContain("Role");
+		expect(html).toContain("<tbody>");
+		expect(html).toContain("<td>");
+		expect(html).toContain("Lyra");
+		expect(html).toContain("Ranger");
+	});
+
+	it("converts a table without separator as body-only", () => {
+		const md = "| A | B |\n| 1 | 2 |";
+		const html = markdownToHtml(md, exported);
+		expect(html).toContain("<table>");
+		expect(html).toContain("<td>");
+		expect(html).not.toContain("<th>");
+	});
+
+	it("escapes HTML inside table cells", () => {
+		const md = "| Col |\n|-----|\n| <script>evil</script> |";
+		const html = markdownToHtml(md, exported);
+		expect(html).not.toContain("<script>");
+		expect(html).toContain("&lt;script&gt;");
 	});
 });
 

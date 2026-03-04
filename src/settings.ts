@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { App, FuzzySuggestModal, PluginSettingTab, Setting, TFolder, TextComponent, setIcon } from "obsidian";
 import { WelcomeModal } from "./onboarding";
 import PlayerVaultPlugin from "./main";
 
@@ -90,25 +90,40 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 		// ══════════════════════════════════════════════════════════════════
 		this.sectionHeader(containerEl, "Export", "folder-output");
 
+		let folderText!: TextComponent;
 		new Setting(containerEl)
 			.setName("Output folder")
 			.setDesc(
 				"Vault-relative path where HTML files are written. The folder is created automatically if it does not exist."
 			)
 			.addText((text) => {
-				text.inputEl.style.width = "240px";
-				text
-					.setPlaceholder("player-vault-export")
-					.setValue(this.plugin.settings.outputFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.outputFolder =
-							value.trim() || "player-vault-export";
-						await this.plugin.saveSettings();
-						if (this.exportHintEl) {
-							this.exportHintEl.textContent = `Output: ${this.plugin.settings.outputFolder}/`;
-						}
+					folderText = text;
+					text.inputEl.style.width = "200px";
+					text
+						.setPlaceholder("player-vault-export")
+						.setValue(this.plugin.settings.outputFolder)
+						.onChange(async (value) => {
+							this.plugin.settings.outputFolder =
+								value.trim() || "player-vault-export";
+							await this.plugin.saveSettings();
+							if (this.exportHintEl) {
+								this.exportHintEl.textContent = `Output: ${this.plugin.settings.outputFolder}/`;
+							}
+						});
+				})
+				.addButton((btn) => {
+					btn.setButtonText("Browse").setTooltip("Pick an existing vault folder").onClick(() => {
+						new FolderSuggestModal(this.app, async (folder) => {
+							const path = folder.path || "/";
+							this.plugin.settings.outputFolder = path;
+							await this.plugin.saveSettings();
+							folderText.setValue(path);
+							if (this.exportHintEl) {
+								this.exportHintEl.textContent = `Output: ${path}/`;
+							}
+						}).open();
 					});
-			});
+				});
 
 		new Setting(containerEl)
 			.setName("Open folder after export")
@@ -317,5 +332,36 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 		input.addEventListener("keydown", (e) => {
 			if ((e as KeyboardEvent).key === "Enter") doAdd();
 		});
+	}
+}
+
+/** Fuzzy folder picker opened by the Output folder Browse button. */
+class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
+	private cb: (folder: TFolder) => void;
+
+	constructor(app: App, cb: (folder: TFolder) => void) {
+		super(app);
+		this.cb = cb;
+		this.setPlaceholder("Type to filter folders…");
+	}
+
+	getItems(): TFolder[] {
+		const folders: TFolder[] = [];
+		const walk = (folder: TFolder) => {
+			folders.push(folder);
+			for (const child of folder.children) {
+				if (child instanceof TFolder) walk(child);
+			}
+		};
+		walk(this.app.vault.getRoot());
+		return folders.sort((a, b) => a.path.localeCompare(b.path));
+	}
+
+	getItemText(folder: TFolder): string {
+		return folder.path || "/";
+	}
+
+	onChooseItem(folder: TFolder): void {
+		this.cb(folder);
 	}
 }

@@ -466,3 +466,51 @@
 .pv-feedback-err {
     color: var(--color-red);
 }
+
+
+/* ── Export progress modal ───────────────────────────────────────────────── */
+
+.pv-progress-modal {
+    width: 420px;
+    max-width: 95vw;
+}
+
+.pv-progress-title {
+    margin: 0 0 14px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.pv-progress-label {
+    margin: 0 0 10px;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pv-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--background-modifier-border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.pv-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--interactive-accent);
+    border-radius: 4px;
+    transition: width 0.15s ease;
+}
+
+.pv-progress-count {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    text-align: right;
+}

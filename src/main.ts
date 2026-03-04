@@ -1,6 +1,7 @@
 import {
 	App,
 	FileSystemAdapter,
+	Modal,
 	Notice,
 	Plugin,
 	TFile,
@@ -94,6 +95,39 @@ ul.note-index li a { color: #a8dadc; text-decoration: none; }
 ul.note-index li a:hover { text-decoration: underline; }
 `;
 
+/** Modal displayed while the export pipeline runs, showing a progress bar and the current note name. */
+class ExportProgressModal extends Modal {
+	private labelEl!: HTMLElement;
+	private barFillEl!: HTMLElement;
+	private countEl!: HTMLElement;
+
+	constructor(app: App) {
+		super(app);
+		this.modalEl.addClass("pv-progress-modal");
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: "Exporting Player Vault…", cls: "pv-progress-title" });
+		this.labelEl = contentEl.createEl("p", { cls: "pv-progress-label", text: "Preparing…" });
+		const bar = contentEl.createEl("div", { cls: "pv-progress-bar" });
+		this.barFillEl = bar.createEl("div", { cls: "pv-progress-fill" });
+		this.countEl = contentEl.createEl("p", { cls: "pv-progress-count", text: "" });
+	}
+
+	setProgress(current: number, total: number, noteName: string) {
+		if (this.labelEl) this.labelEl.textContent = noteName;
+		if (this.countEl) this.countEl.textContent = `${current} / ${total}`;
+		if (this.barFillEl)
+			this.barFillEl.style.width = `${total > 0 ? Math.round((current / total) * 100) : 0}%`;
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
 export default class PlayerVaultPlugin extends Plugin {
 	settings!: PlayerVaultSettings;
 
@@ -142,11 +176,14 @@ export default class PlayerVaultPlugin extends Plugin {
 
 	/** Main export pipeline */
 	async runExport() {
-		const notice = new Notice("Player Vault: starting export…", 0);
+		const progress = new ExportProgressModal(this.app);
+		progress.open();
 
 		try {
-			await this.exportVault();
-			notice.hide();
+			await this.exportVault((current, total, name) => {
+				progress.setProgress(current, total, name);
+			});
+			progress.close();
 			new Notice("Player Vault: export complete! ✅", 4000);
 
 			if (this.settings.openAfterExport) {
@@ -165,7 +202,7 @@ export default class PlayerVaultPlugin extends Plugin {
 				}
 			}
 		} catch (err) {
-			notice.hide();
+			progress.close();
 			console.error("Player Vault export error:", err);
 			new Notice(
 				`Player Vault: export failed – ${(err as Error).message}`,
@@ -175,7 +212,7 @@ export default class PlayerVaultPlugin extends Plugin {
 	}
 
 	/** Full vault export implementation */
-	async exportVault() {
+	async exportVault(onProgress?: (current: number, total: number, name: string) => void) {
 		const { vault } = this.app;
 		const outputFolder = normalizePath(this.settings.outputFolder);
 
@@ -232,8 +269,12 @@ export default class PlayerVaultPlugin extends Plugin {
 
 		// ── Pass 2: convert each note to HTML and write ────────────────────
 		const indexEntries: Array<{ name: string; filename: string }> = [];
+			let exportCount = 0;
+			const exportTotal = survivingNotes.size;
 
-		for (const [, { file, sanitized, outputFilename }] of survivingNotes) {
+			for (const [, { file, sanitized, outputFilename }] of survivingNotes) {
+				exportCount++;
+				onProgress?.(exportCount, exportTotal, file.basename);
 			const htmlBody = markdownToHtml(sanitized, exportedNoteMap);
 			const fullPage = wrapInPage(file.basename, htmlBody);
 			const outPath = normalizePath(`${outputFolder}/${outputFilename}`);

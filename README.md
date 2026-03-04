@@ -234,7 +234,7 @@ git clone https://github.com/tescolopio/Obsidian_PlayerVault.git
 cd Obsidian_PlayerVault
 
 # Install dependencies
-npm install
+npm ci
 
 # Compile in watch mode (outputs main.js)
 npm run dev
@@ -249,17 +249,15 @@ npm test
 To work on the plugin inside Obsidian, symlink (or copy) your cloned folder into  
 `<vault>/.obsidian/plugins/player-vault/` and enable it under Community plugins.
 
+For a full technical breakdown see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the [development roadmap](docs/ROADMAP.md).
+
 ---
 
 ## Contributing
 
-Bug reports and pull requests are welcome!
+Bug reports and pull requests are welcome! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the full guide including setup instructions, PR checklist, and style conventions.
 
-1. Fork the repository and create a feature branch.
-2. Make your changes, add or update tests under `tests/`, and ensure `npm test` passes.
-3. Open a pull request against `main` with a clear description of the change.
-
-Please follow the existing code style (TypeScript strict mode, ESLint config provided).
+**Security issues** — please do not open a public issue. Follow the process in [docs/SECURITY.md](docs/SECURITY.md).
 
 ---
 

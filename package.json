@@ -1,36 +1,39 @@
 {
-  "name": "obsidian-player-vault",
-  "version": "1.0.0",
-  "description": "Sanitize and export your Obsidian vault to a static HTML wiki for players",
-  "main": "main.js",
-  "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
-    "lint": "eslint src --ext .ts",
-    "test": "jest"
-  },
-  "keywords": ["obsidian", "plugin", "export", "html", "gm", "tabletop"],
-  "author": "tescolopio",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.2",
-    "@typescript-eslint/eslint-plugin": "7.16.0",
-    "@typescript-eslint/parser": "7.16.0",
-    "builtin-modules": "3.3.0",
-    "esbuild": "0.21.5",
-    "eslint": "8.57.0",
-    "jest": "^29.7.0",
-    "obsidian": "latest",
-    "ts-jest": "^29.1.5",
-    "typescript": "5.5.3"
-  },
-  "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.ts"],
-    "moduleNameMapper": {
-      "^obsidian$": "<rootDir>/tests/__mocks__/obsidian.ts"
+    "name": "obsidian-player-vault",
+    "version": "1.0.0",
+    "description": "Sanitize and export your Obsidian vault to a static HTML wiki for players",
+    "main": "main.js",
+    "scripts": {
+        "dev": "node esbuild.config.mjs",
+        "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+        "lint": "eslint src --ext .ts",
+        "test": "jest"
+    },
+    "keywords": ["obsidian", "plugin", "export", "html", "gm", "tabletop"],
+    "author": "tescolopio",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/jest": "^29.5.12",
+        "@types/node": "^20.14.2",
+        "@typescript-eslint/eslint-plugin": "7.16.0",
+        "@typescript-eslint/parser": "7.16.0",
+        "builtin-modules": "3.3.0",
+        "esbuild": "0.21.5",
+        "eslint": "8.57.0",
+        "jest": "^29.7.0",
+        "obsidian": "latest",
+        "ts-jest": "^29.1.5",
+        "typescript": "5.5.3"
+    },
+    "jest": {
+        "preset": "ts-jest",
+        "testEnvironment": "node",
+        "testMatch": ["**/tests/**/*.test.ts"],
+        "transform": {
+            "^.+\\.ts$": ["ts-jest", { "tsconfig": "tsconfig.jest.json" }]
+        },
+        "moduleNameMapper": {
+            "^obsidian$": "<rootDir>/tests/__mocks__/obsidian.ts"
+        }
     }
-  }
 }

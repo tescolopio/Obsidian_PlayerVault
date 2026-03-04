@@ -13,7 +13,9 @@
  *  - Block quotes (> …)
  *  - Unordered lists (- or * or +)
  *  - Ordered lists (1. …)
+ *  - Strikethrough (~~text~~)
  *  - Horizontal rules (---, ***, ___)
+ *  - Tables (GFM pipe tables)
  *  - [[Wiki links]] → <a> tags (resolved via the exported-notes map)
  *  - [text](url) Markdown links
  *  - Images ![alt](src)
@@ -185,6 +187,9 @@ export function convertInline(
 	text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
 	text = text.replace(/_(.+?)_/g, "<em>$1</em>");
 
+	// ── Strikethrough ~~text~~ ────────────────────────────────────────────
+	text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
 	// ── Re-insert extracted HTML fragments ────────────────────────────────
 	text = text.replace(/\x02(\d+)\x03/g, (_, i) => slots[+i]);
 
@@ -215,6 +220,10 @@ export function markdownToHtml(
 	let inUnorderedList = false;
 	let inOrderedList = false;
 	let listLines: string[] = [];
+
+	let inTable = false;
+	let tableRows: string[][] = [];
+	let tableSeparatorIdx = -1;
 
 	let paragraphLines: string[] = [];
 
@@ -248,6 +257,40 @@ export function markdownToHtml(
 		inOrderedList = false;
 	};
 
+	const flushTable = () => {
+		if (tableRows.length === 0) { inTable = false; return; }
+		let html = "<table>";
+		if (tableSeparatorIdx >= 0) {
+			const headerRows = tableRows.slice(0, tableSeparatorIdx);
+			const bodyRows = tableRows.slice(tableSeparatorIdx);
+			if (headerRows.length > 0) {
+				html += "<thead>";
+				for (const row of headerRows) {
+					html += "<tr>" + row.map((c) => `<th>${convertInline(c.trim(), exportedNotes)}</th>`).join("") + "</tr>";
+				}
+				html += "</thead>";
+			}
+			if (bodyRows.length > 0) {
+				html += "<tbody>";
+				for (const row of bodyRows) {
+					html += "<tr>" + row.map((c) => `<td>${convertInline(c.trim(), exportedNotes)}</td>`).join("") + "</tr>";
+				}
+				html += "</tbody>";
+			}
+		} else {
+			html += "<tbody>";
+			for (const row of tableRows) {
+				html += "<tr>" + row.map((c) => `<td>${convertInline(c.trim(), exportedNotes)}</td>`).join("") + "</tr>";
+			}
+			html += "</tbody>";
+		}
+		html += "</table>";
+		htmlParts.push(html);
+		tableRows = [];
+		tableSeparatorIdx = -1;
+		inTable = false;
+	};
+
 	for (const rawLine of lines) {
 		// ── Code block fence ──────────────────────────────────────────────────
 		if (/^```/.test(rawLine)) {
@@ -263,6 +306,7 @@ export function markdownToHtml(
 				flushParagraph();
 				flushBlockquote();
 				flushList();
+				flushTable();
 				inCodeBlock = true;
 				codeLang = rawLine.slice(3).trim();
 			}
@@ -275,6 +319,25 @@ export function markdownToHtml(
 		}
 
 		const line = rawLine;
+
+		// ── Table row ─────────────────────────────────────────────────────────
+		if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+			flushParagraph();
+			flushBlockquote();
+			flushList();
+			inTable = true;
+			const cells = line.trim().replace(/^\||\|$/g, "").split("|");
+			const isSep = cells.every((c) => /^[\s:]*-+[\s:]*$/.test(c));
+			if (!isSep) {
+				tableRows.push(cells);
+			} else if (tableSeparatorIdx < 0) {
+				tableSeparatorIdx = tableRows.length;
+			}
+			continue;
+		}
+		if (inTable) {
+			flushTable();
+		}
 
 		// ── Horizontal rule ───────────────────────────────────────────────────
 		if (/^(---+|\*\*\*+|___+)\s*$/.test(line)) {
@@ -292,8 +355,14 @@ export function markdownToHtml(
 			flushBlockquote();
 			flushList();
 			const level = headingMatch[1].length;
-			const text = convertInline(headingMatch[2], exportedNotes);
-			htmlParts.push(`<h${level}>${text}</h${level}>`);
+			const rawHeadingText = headingMatch[2];
+			const headingId = rawHeadingText
+				.toLowerCase()
+				.replace(/[^\w\s-]/g, "")
+				.trim()
+				.replace(/\s+/g, "-");
+			const text = convertInline(rawHeadingText, exportedNotes);
+			htmlParts.push(`<h${level} id="${escapeHtml(headingId)}">${text}</h${level}>`);
 			continue;
 		}
 
@@ -351,6 +420,7 @@ export function markdownToHtml(
 	flushParagraph();
 	flushBlockquote();
 	flushList();
+	flushTable();
 
 	return htmlParts.join("\n");
 }

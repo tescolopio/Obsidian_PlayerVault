@@ -58,14 +58,16 @@ The two-step approach means TypeScript errors are caught before bundling while e
 The export runs in two sequential passes over the vault.
 
 ```
-Trigger (ribbon click or command)
+Trigger (ribbon click, command, or Settings button)
         │
         ▼
-  [Pass 1 — Sanitise]
+  [Pass 1 — Filter & Sanitise]
   For every .md file in the vault:
     ├── Skip if gm-only: true in front-matter
-    ├── Run sanitizer.stripSecrets(content, patterns)
-    └── Add to survivingNotes: Map<filePath, strippedContent>
+    ├── Skip if file.path matches any excludedFolders entry (profile)
+    ├── Skip if inclusionTag is set and note does not carry that tag (profile)
+    ├── sanitizeContent(raw, { extraPatterns, stripAllComments })  ← from profile
+    └── Add to survivingNotes: Map<filePath, { file, sanitized, outputFilename }>
         │
         ▼
   Build ExportedNoteMap: Map<basename.lower, outputFilename>
@@ -83,6 +85,7 @@ Trigger (ribbon click or command)
         ▼
   Write index.html  (buildIndexPage)
   Write styles.css  (embedded CSS string)
+  Write _export-manifest.json  (timestamp, profile name, note list)
         │
         ▼
   [Optional] Open output folder in system explorer
@@ -147,6 +150,10 @@ type ExportedNoteMap = Map<string, string>;
 // Output filename derived from vault path
 // "Characters/Lyra Silverwind.md" → "Characters_Lyra_Silverwind.html"
 function filePathToOutputName(filePath: string): string;
+
+// Filter helpers (src/sanitizer.ts)
+function isNoteExcludedByFolder(filePath: string, excludedFolders: string[]): boolean;
+function isNoteIncludedByTag(content: string, inclusionTag: string): boolean;
 ```
 
 `ExportedNoteMap` is built in a dedicated pass rather than incrementally so that every note can resolve links to every other note at conversion time, regardless of processing order.
@@ -158,14 +165,29 @@ function filePathToOutputName(filePath: string): string;
 Defined in `src/settings.ts`:
 
 ```typescript
+/** A named export configuration. All per-export options live here. */
+interface ExportProfile {
+  id: string;               // unique key ("default" or "profile-<timestamp>")
+  name: string;             // display name shown in the UI dropdown
+  outputFolder: string;     // default: "player-vault-export"
+  excludedFolders: string[];// vault paths excluded entirely
+  inclusionTag: string;     // only export notes with this tag; "" = no filter
+  extraSecretPatterns: string[]; // user-supplied regex strings
+  stripAllComments: boolean;// strip all %% … %% blocks
+}
+
 interface PlayerVaultSettings {
-  outputFolder: string;        // default: "PlayerVault_Export"
-  gmPatterns: string[];        // default: [] — user-supplied regex strings
-  hasSeenWelcome: boolean;     // default: false — cleared after onboarding
+  profiles: ExportProfile[]; // always ≥ 1 profile
+  activeProfileId: string;   // id of the currently active profile
+  openAfterExport: boolean;  // reveal output folder in OS file browser
+  hasSeenWelcome: boolean;   // cleared after onboarding
 }
 ```
 
-Settings are persisted via `this.loadData()` / `this.saveData()` (Obsidian plugin API).
+`getActiveProfile(settings)` resolves the active profile with a safe fallback chain:  
+`profiles.find(id match) ?? profiles[0] ?? DEFAULT_PROFILE`.
+
+**Migration:** `loadSettings()` detects the legacy v1.1 flat format (`!data.profiles`) and auto-converts `outputFolder` / `extraSecretPatterns` / `stripAllComments` into a single `ExportProfile`, preserving all prior user settings without any manual action.
 
 ---
 

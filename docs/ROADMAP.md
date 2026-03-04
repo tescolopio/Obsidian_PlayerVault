@@ -77,15 +77,15 @@ Focus: make the generated wiki easier to navigate.
 
 ---
 
-## v2.0 — Platform & Integration 💭
+## v2.0 — Platform & Integration ✅ _Released_
 
-Under consideration — requires significant design work or Obsidian API changes.
+All five v2.0 items shipped in **2.0.0**.
 
-- 💭 **Mobile support** — remove `isDesktopOnly` restriction; replace `FileSystemAdapter` path with a cross-platform abstraction
-- 💭 **Publish to web** — optional one-click upload to a static host (GitHub Pages, Netlify drop)
-- 💭 **Incremental export** — only re-export notes modified since the last export run
-- 💭 **Obsidian Publish parity** — honour Obsidian Publish's `publish: false` front-matter flag
-- 💭 **Localisation** — i18n support for the plugin UI and exported HTML chrome
+- ✅ **Mobile support** — `isDesktopOnly` removed; "open folder" step guarded with `Platform.isDesktop`
+- ✅ **Publish to web** — per-profile deploy-hook URL + **Publish** button + command palette entry; supports Netlify, GitHub Actions, Vercel
+- ✅ **Incremental export** — `.pv-cache.json` mtime cache; unchanged notes skipped; cache invalidated on note-count change
+- ✅ **Obsidian Publish parity** — `publish: false` / `publish: "false"` front-matter flag silently excludes a note; shown in dry-run output
+- ✅ **Localisation** — `PV_STRINGS` / `PvLocale` i18n foundation; locale vault setting; `<html lang>` attribute on exported pages
 
 ---
 

@@ -1,4 +1,4 @@
-import { sanitizeContent, isNoteFullySecret, isNoteExcludedByFolder, isNoteIncludedByTag, DEFAULT_SECRET_PATTERNS } from "../src/sanitizer";
+import { sanitizeContent, isNoteFullySecret, isNoteExcludedByFolder, isNoteIncludedByTag, DEFAULT_SECRET_PATTERNS, isNotePublishBlocked } from "../src/sanitizer";
 
 describe("sanitizeContent", () => {
 	describe("%%SECRET%% blocks", () => {
@@ -179,5 +179,32 @@ describe("isNoteIncludedByTag", () => {
 
 	it("returns false when the tag is not present in the note", () => {
 		expect(isNoteIncludedByTag("No tags here at all", "#player-facing")).toBe(false);
+	});
+});
+
+describe("isNotePublishBlocked", () => {
+	it("returns true when front matter contains publish: false (boolean)", () => {
+		const content = "---\npublish: false\ntags: [lore]\n---\nBody text";
+		expect(isNotePublishBlocked(content)).toBe(true);
+	});
+
+	it("returns true when front matter contains publish: \"false\" (string)", () => {
+		const content = "---\npublish: \"false\"\n---\nBody text";
+		expect(isNotePublishBlocked(content)).toBe(true);
+	});
+
+	it("returns false when front matter contains publish: true", () => {
+		const content = "---\npublish: true\n---\nBody text";
+		expect(isNotePublishBlocked(content)).toBe(false);
+	});
+
+	it("returns false when note has no front matter", () => {
+		const content = "Just a normal note with no YAML.";
+		expect(isNotePublishBlocked(content)).toBe(false);
+	});
+
+	it("returns false when front matter has no publish key", () => {
+		const content = "---\ntags: [player-facing]\ntitle: The Tavern\n---\nBody";
+		expect(isNotePublishBlocked(content)).toBe(false);
 	});
 });

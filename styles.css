@@ -515,6 +515,7 @@
     text-align: right;
 }
 
+
 /* ── v1.3 — Custom CSS textarea (Appearance section) ─────────────────────── */
 
 .pv-custom-css-wrap {
@@ -538,4 +539,14 @@
 .pv-custom-css-input:focus {
     outline: none;
     border-color: var(--interactive-accent);
+}
+
+
+/* ── v2.0 — Deploy-hook hint text (Publish to Web section) ───────────────── */
+
+.pv-deploy-hint {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin: 0.4rem 0 0.8rem 0;
+    line-height: 1.5;
 }

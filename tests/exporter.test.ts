@@ -11,6 +11,8 @@ import {
 	buildSearchIndexJs,
 	SidebarEntry,
 	SearchEntry,
+	PV_STRINGS,
+	PvLocale,
 } from "../src/exporter";
 
 // Helper: build an ExportedNoteMap from a list of bare note names.
@@ -379,5 +381,43 @@ describe("wrapInPage with v1.3 options", () => {
 		const html = wrapInPage("T", "<p/>", { customCss: "body { color: red; }" });
 		expect(html).toContain("<style>");
 		expect(html).toContain("color: red");
+	});
+});
+
+describe("PV_STRINGS / i18n", () => {
+	const REQUIRED_KEYS: (keyof typeof PV_STRINGS.en)[] = [
+		"siteTitle",
+		"indexTitle",
+		"indexHeading",
+		"searchPlaceholder",
+		"toggleTheme",
+		"linkedFrom",
+		"notesHeading",
+		"homeLabel",
+	];
+
+	it("PV_STRINGS.en contains all required string keys", () => {
+		for (const key of REQUIRED_KEYS) {
+			expect(typeof PV_STRINGS.en[key]).toBe("string");
+			expect(PV_STRINGS.en[key].length).toBeGreaterThan(0);
+		}
+	});
+
+	it("wrapInPage with locale:\"en\" uses the English site title", () => {
+		const html = wrapInPage("Tavern", "<p>content</p>", { locale: "en" as PvLocale });
+		expect(html).toContain(PV_STRINGS.en.siteTitle);
+	});
+
+	it("wrapInPage without locale defaults to English strings", () => {
+		const withLocale = wrapInPage("Tavern", "<p>content</p>", { locale: "en" as PvLocale });
+		const withoutLocale = wrapInPage("Tavern", "<p>content</p>", {});
+		// Both should contain the same English site title
+		expect(withoutLocale).toContain(PV_STRINGS.en.siteTitle);
+		expect(withoutLocale).toContain(PV_STRINGS.en.searchPlaceholder);
+	});
+
+	it("wrapInPage emits the correct lang attribute for the en locale", () => {
+		const html = wrapInPage("Tavern", "<p/>", { locale: "en" as PvLocale });
+		expect(html).toContain('lang="en"');
 	});
 });

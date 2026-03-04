@@ -72,7 +72,50 @@ export interface WrapPageOptions {
 	vaultPath?: string;
 	/** Extra CSS injected as a <style> block in <head>. */
 	customCss?: string;
+	/**
+	 * BCP-47 locale key selecting which PV_STRINGS bundle to use for
+	 * the generated wiki's chrome text. Defaults to "en".
+	 */
+	locale?: PvLocale;
 }
+
+// ── v2.0 i18n / locale ────────────────────────────────────────────────────────
+
+/**
+ * Localised strings for the exported wiki chrome.
+ *
+ * Add a new key to `PV_STRINGS` to ship a new locale.  The type of each value
+ * must be identical to the `"en"` entry — TypeScript will enforce this.
+ *
+ * @example Adding French:
+ * ```ts
+ * fr: {
+ *   siteTitle: "Wiki Joueurs",
+ *   indexTitle: "Wiki Joueurs – Index",
+ *   indexHeading: "Wiki Joueurs",
+ *   searchPlaceholder: "Chercher des notes…",
+ *   toggleTheme: "Changer le thème",
+ *   linkedFrom: "Référencé par",
+ *   notesHeading: "Notes",
+ *   homeLabel: "Accueil",
+ * }
+ * ```
+ */
+export const PV_STRINGS = {
+	en: {
+		siteTitle: "Player Wiki",
+		indexTitle: "Player Wiki \u2013 Index",
+		indexHeading: "Player Wiki",
+		searchPlaceholder: "Search notes\u2026",
+		toggleTheme: "Toggle theme",
+		linkedFrom: "Linked from",
+		notesHeading: "Notes",
+		homeLabel: "Home",
+	},
+} as const;
+
+export type PvLocale = keyof typeof PV_STRINGS;
+type PvStrings = (typeof PV_STRINGS)[PvLocale];
 
 /**
  * Derive a safe, unique output filename from a vault file path.
@@ -472,7 +515,7 @@ export function markdownToHtml(
 
 // ── Internal layout helpers (v1.3) ────────────────────────────────────────────
 
-function buildSidebarHtml(entries: SidebarEntry[], currentFilename?: string): string {
+function buildSidebarHtml(entries: SidebarEntry[], strings: PvStrings, currentFilename?: string): string {
 	const rootNotes = entries.filter((e) => e.folder === "");
 	const byFolder = new Map<string, SidebarEntry[]>();
 	for (const e of entries.filter((e) => e.folder !== "")) {
@@ -481,7 +524,7 @@ function buildSidebarHtml(entries: SidebarEntry[], currentFilename?: string): st
 		byFolder.set(e.folder, arr);
 	}
 
-	let html = `<h2>Notes</h2>`;
+	let html = `<h2>${escapeHtml(strings.notesHeading)}</h2>`;
 
 	if (rootNotes.length) {
 		html += `<ul>`;
@@ -504,24 +547,24 @@ function buildSidebarHtml(entries: SidebarEntry[], currentFilename?: string): st
 	return html;
 }
 
-function buildBreadcrumbHtml(vaultPath: string, title: string): string {
+function buildBreadcrumbHtml(vaultPath: string, title: string, strings: PvStrings): string {
 	const parts = vaultPath.replace(/\.md$/i, "").split("/");
 	if (parts.length <= 1) {
-		return `<nav class="pv-breadcrumb" aria-label="Breadcrumb"><a href="index.html">Home</a><span class="pv-bc-sep">›</span><span>${escapeHtml(title)}</span></nav>`;
+		return `<nav class="pv-breadcrumb" aria-label="Breadcrumb"><a href="index.html">${escapeHtml(strings.homeLabel)}</a><span class="pv-bc-sep">›</span><span>${escapeHtml(title)}</span></nav>`;
 	}
 	const folders = parts
 		.slice(0, -1)
 		.map((f) => `<span>${escapeHtml(f)}</span>`)
 		.join(`<span class="pv-bc-sep">›</span>`);
-	return `<nav class="pv-breadcrumb" aria-label="Breadcrumb"><a href="index.html">Home</a><span class="pv-bc-sep">›</span>${folders}<span class="pv-bc-sep">›</span><span>${escapeHtml(title)}</span></nav>`;
+	return `<nav class="pv-breadcrumb" aria-label="Breadcrumb"><a href="index.html">${escapeHtml(strings.homeLabel)}</a><span class="pv-bc-sep">›</span>${folders}<span class="pv-bc-sep">›</span><span>${escapeHtml(title)}</span></nav>`;
 }
 
-function buildBackLinksHtml(backLinks: BackLinkEntry[]): string {
+function buildBackLinksHtml(backLinks: BackLinkEntry[], strings: PvStrings): string {
 	if (backLinks.length === 0) return "";
 	const items = backLinks
 		.map((b) => `<li><a href="${escapeHtml(b.filename)}">${escapeHtml(b.name)}</a></li>`)
 		.join("");
-	return `<footer class="pv-backlinks"><h3>Linked from</h3><ul>${items}</ul></footer>`;
+	return `<footer class="pv-backlinks"><h3>${escapeHtml(strings.linkedFrom)}</h3><ul>${items}</ul></footer>`;
 }
 
 /**
@@ -538,16 +581,17 @@ export function wrapInPage(title: string, body: string, optsOrCss: string | Wrap
 	const backLinks = opts.backLinks ?? [];
 	const vaultPath = opts.vaultPath;
 	const customCss = opts.customCss ?? "";
+	const strings: PvStrings = PV_STRINGS[opts.locale ?? "en"] ?? PV_STRINGS.en;
 
 	const currentFilename = vaultPath ? filePathToOutputName(vaultPath) : undefined;
-	const sidebarHtml = buildSidebarHtml(sidebarEntries, currentFilename);
-	const breadcrumbHtml = vaultPath ? buildBreadcrumbHtml(vaultPath, title) : "";
-	const backLinksHtml = buildBackLinksHtml(backLinks);
+	const sidebarHtml = buildSidebarHtml(sidebarEntries, strings, currentFilename);
+	const breadcrumbHtml = vaultPath ? buildBreadcrumbHtml(vaultPath, title, strings) : "";
+	const backLinksHtml = buildBackLinksHtml(backLinks, strings);
 	const safeCss = customCss.trim().replace(/<\/style>/gi, "/* </style> */");
 	const customCssBlock = safeCss ? `\n  <style>\n${safeCss}\n  </style>` : "";
 
 	return `<!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="${escapeHtml(opts.locale ?? "en")}" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -558,14 +602,14 @@ export function wrapInPage(title: string, body: string, optsOrCss: string | Wrap
 <body>
   <header class="pv-header">
     <div class="pv-header-left">
-      <a href="index.html" class="pv-site-title">Player Wiki</a>${breadcrumbHtml ? `\n      ${breadcrumbHtml}` : ""}
+      <a href="index.html" class="pv-site-title">${escapeHtml(strings.siteTitle)}</a>${breadcrumbHtml ? `\n      ${breadcrumbHtml}` : ""}
     </div>
     <div class="pv-header-right">
       <div class="pv-search-wrap">
-        <input type="search" id="pv-search" placeholder="Search notes\u2026" aria-label="Search notes">
+        <input type="search" id="pv-search" placeholder="${escapeHtml(strings.searchPlaceholder)}" aria-label="${escapeHtml(strings.searchPlaceholder)}">
         <div id="pv-search-dropdown" class="pv-search-dropdown" hidden></div>
       </div>
-      <button id="pv-theme-btn" aria-label="Toggle theme">&#x2600;</button>
+      <button id="pv-theme-btn" aria-label="${escapeHtml(strings.toggleTheme)}">&#x2600;</button>
     </div>
   </header>
   <div class="layout">
@@ -592,6 +636,8 @@ export function buildIndexPage(
 	notes: Array<{ name: string; filename: string }>,
 	optsOrCss: string | WrapPageOptions = {}
 ): string {
+	const opts: WrapPageOptions = typeof optsOrCss === "string" ? { cssPath: optsOrCss } : optsOrCss;
+	const strings: PvStrings = PV_STRINGS[opts.locale ?? "en"] ?? PV_STRINGS.en;
 	const items = notes
 		.map(
 			({ name, filename }) =>
@@ -599,8 +645,8 @@ export function buildIndexPage(
 		)
 		.join("\n");
 
-	const body = `<h1>Player Wiki</h1>\n<ul class="note-index">\n${items}\n</ul>`;
-	return wrapInPage("Player Wiki \u2013 Index", body, optsOrCss);
+	const body = `<h1>${escapeHtml(strings.indexHeading)}</h1>\n<ul class="note-index">\n${items}\n</ul>`;
+	return wrapInPage(strings.indexTitle, body, opts);
 }
 
 // ── v1.3 exported helpers ─────────────────────────────────────────────────────

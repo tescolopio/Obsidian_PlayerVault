@@ -3,6 +3,7 @@ import {
 	FileSystemAdapter,
 	Modal,
 	Notice,
+	Platform,
 	Plugin,
 	TFile,
 	normalizePath,
@@ -16,7 +17,7 @@ import {
 	getActiveProfile,
 	compileExtraPatterns,
 } from "./settings";
-import { sanitizeContent, isNoteFullySecret, isNoteExcludedByFolder, isNoteIncludedByTag } from "./sanitizer";
+import { sanitizeContent, isNoteFullySecret, isNoteExcludedByFolder, isNoteIncludedByTag, isNotePublishBlocked } from "./sanitizer";
 import {
 	markdownToHtml,
 	wrapInPage,
@@ -28,11 +29,28 @@ import {
 	buildSearchIndexJs,
 	SEARCH_JS,
 	SearchEntry,
+	PvLocale,
 } from "./exporter";
 import { WelcomeModal } from "./onboarding";
 
+// ── v2.0 Incremental export cache ─────────────────────────────────────────────
+
+/**
+ * Persisted as `.pv-cache.json` in the output folder.
+ * Records the mtime (ms) of each surviving note at the time it was last
+ * converted, plus the total surviving-note count so the cache is auto-
+ * invalidated when notes are added or removed from the export set.
+ */
+interface ExportCache {
+	version: 2;
+	/** Number of notes in the last successful export. */
+	noteCount: number;
+	/** Maps vault file path → mtime (ms) from TFile.stat.mtime. */
+	entries: Record<string, number>;
+}
+
 /** CSS embedded in the export output folder as styles.css */
-const EXPORT_CSS = `/* Player Vault – exported wiki styles (v1.3) */
+const EXPORT_CSS = `/* Player Vault – exported wiki styles (v2.0) */
 *, *::before, *::after { box-sizing: border-box; }
 body {
   font-family: Georgia, "Times New Roman", serif;
@@ -282,7 +300,7 @@ class ExportProgressModal extends Modal {
 	}
 }
 
-type DryRunReason = "folder" | "tag" | "gm-only";
+type DryRunReason = "folder" | "tag" | "gm-only" | "publish";
 interface DryRunNote { name: string; path: string; exported: boolean; reason?: DryRunReason; }
 
 /** Modal that previews which notes would be exported without writing any files. */
@@ -307,6 +325,7 @@ class DryRunModal extends Modal {
 				"gm-only": "GM-only content",
 				"folder": "excluded folder",
 				"tag": "missing inclusion tag",
+				"publish": "publish: false",
 			};
 			for (const n of excluded) {
 				const label = n.reason ? ` (${REASON_LABEL[n.reason]})` : "";
@@ -350,6 +369,12 @@ export default class PlayerVaultPlugin extends Plugin {
 			callback: () => { this.runDryRun(); },
 		});
 
+		this.addCommand({
+			id: "publish-player-vault",
+			name: "Player Vault: Publish to Web (trigger deploy hook)",
+			callback: () => { this.runPublish(); },
+		});
+
 		// Settings tab
 		this.addSettingTab(new PlayerVaultSettingTab(this.app, this));
 
@@ -375,6 +400,7 @@ export default class PlayerVaultPlugin extends Plugin {
 				stripAllComments: data.stripAllComments ?? false,
 			};
 			this.settings = {
+				...DEFAULT_SETTINGS,
 				profiles: [legacyProfile],
 				activeProfileId: legacyProfile.id,
 				openAfterExport: data.openAfterExport ?? false,
@@ -383,6 +409,14 @@ export default class PlayerVaultPlugin extends Plugin {
 		} else {
 			this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 		}
+		// ── v2.0 profile field migration ────────────────────────────────────
+		// Ensure every profile loaded from disk has the new v2.0 fields.
+		for (const p of this.settings.profiles) {
+			if (p.incrementalExport === undefined) p.incrementalExport = false;
+			if (p.deployHookUrl === undefined) p.deployHookUrl = "";
+		}
+		// Ensure global locale field exists
+		if (!this.settings.locale) this.settings.locale = "en";
 	}
 
 	async saveSettings() {
@@ -402,7 +436,7 @@ export default class PlayerVaultPlugin extends Plugin {
 			progress.close();
 			new Notice("Player Vault: export complete! ✅", 4000);
 
-			if (this.settings.openAfterExport) {
+			if (this.settings.openAfterExport && Platform.isDesktop) {
 				const { adapter } = this.app.vault;
 				if (!(adapter instanceof FileSystemAdapter)) {
 					new Notice("Player Vault: cannot open folder – not a filesystem vault.", 4000);
@@ -437,6 +471,10 @@ export default class PlayerVaultPlugin extends Plugin {
 
 		for (const file of allFiles) {
 			const raw = await vault.read(file);
+			if (isNotePublishBlocked(raw)) {
+				results.push({ name: file.basename, path: file.path, exported: false, reason: "publish" });
+				continue;
+			}
 			if (isNoteFullySecret(raw)) {
 				results.push({ name: file.basename, path: file.path, exported: false, reason: "gm-only" });
 				continue;
@@ -453,6 +491,44 @@ export default class PlayerVaultPlugin extends Plugin {
 		}
 
 		new DryRunModal(this.app, results, profile.name).open();
+	}
+
+	/**
+	 * POST to the configured deploy hook URL (Netlify build hook, GitHub Actions
+	 * repository_dispatch, Vercel deploy hook, etc.).
+	 *
+	 * The deploy hook is profile-specific so teams can maintain separate
+	 * staging / production pipelines per export profile.
+	 */
+	async runPublish() {
+		const profile = getActiveProfile(this.settings);
+		const url = profile.deployHookUrl.trim();
+		if (!url) {
+			new Notice(
+				"Player Vault: no deploy hook URL configured.\n" +
+				"Add one in Settings → Publish to Web.",
+				5000,
+			);
+			return;
+		}
+		try {
+			new Notice("Player Vault: triggering deploy…", 3000);
+			const res = await fetch(url, { method: "POST" });
+			if (res.ok) {
+				new Notice("Player Vault: deploy triggered ✓  Your site will be live shortly.", 5000);
+			} else {
+				new Notice(
+					`Player Vault: deploy hook returned HTTP ${res.status}. ` +
+					"Double-check the URL in Settings → Publish to Web.",
+					7000,
+				);
+			}
+		} catch (err) {
+			new Notice(
+				`Player Vault: deploy request failed – ${(err as Error).message}`,
+				7000,
+			);
+		}
 	}
 
 	/** Full vault export implementation */
@@ -475,6 +551,7 @@ export default class PlayerVaultPlugin extends Plugin {
 		for (const file of allFiles) {
 			const raw = await vault.read(file);
 
+			if (isNotePublishBlocked(raw)) continue;
 			if (isNoteFullySecret(raw)) continue;
 			if (isNoteExcludedByFolder(file.path, profile.excludedFolders)) continue;
 			if (!isNoteIncludedByTag(raw, profile.inclusionTag)) continue;
@@ -525,30 +602,60 @@ export default class PlayerVaultPlugin extends Plugin {
 				.slice(0, 500),
 		}));
 
+		// ── v2.0 Incremental export cache ─────────────────────────────────
+		const locale = (this.settings.locale ?? "en") as PvLocale;
+		let prevCache: ExportCache | null = null;
+		if (profile.incrementalExport) {
+			try {
+				const cachePath = normalizePath(`${outputFolder}/.pv-cache.json`);
+				if (await vault.adapter.exists(cachePath)) {
+					const raw = await vault.adapter.read(cachePath);
+					const parsed = JSON.parse(raw);
+					if (parsed.version === 2) prevCache = parsed as ExportCache;
+				}
+			} catch { /* ignore malformed cache */ }
+		}
+		// Invalidate if the surviving-note count changed (notes added/removed)
+		const cacheValid = prevCache !== null && prevCache.noteCount === survivingNotes.size;
+
 		// ── Pass 2: convert each note to HTML and write ────────────────────
 		const indexEntries: Array<{ name: string; filename: string }> = [];
-			let exportCount = 0;
-			const exportTotal = survivingNotes.size;
+		let exportCount = 0;
+		let incrementalSkipped = 0;
+		const exportTotal = survivingNotes.size;
 
-			for (const [, { file, sanitized, outputFilename }] of survivingNotes) {
-				exportCount++;
-				onProgress?.(exportCount, exportTotal, file.basename);
+		for (const [, { file, sanitized, outputFilename }] of survivingNotes) {
+			exportCount++;
+			onProgress?.(exportCount, exportTotal, file.basename);
+
+			// Incremental: skip if mtime unchanged
+			if (cacheValid && prevCache!.entries[file.path] === file.stat.mtime) {
+				indexEntries.push({ name: file.basename, filename: outputFilename });
+				incrementalSkipped++;
+				continue;
+			}
+
 			const htmlBody = markdownToHtml(sanitized, exportedNoteMap);
 			const fullPage = wrapInPage(file.basename, htmlBody, {
 				sidebarEntries,
 				backLinks: backLinksMap.get(outputFilename) ?? [],
 				vaultPath: file.path,
 				customCss: profile.customCss,
+				locale,
 			});
 			const outPath = normalizePath(`${outputFolder}/${outputFilename}`);
 			await vault.adapter.write(outPath, fullPage);
 			indexEntries.push({ name: file.basename, filename: outputFilename });
 		}
 
+		if (incrementalSkipped > 0) {
+			console.log(`Player Vault: incremental export — skipped ${incrementalSkipped} unchanged note(s).`);
+		}
+
 		indexEntries.sort((a, b) => a.name.localeCompare(b.name));
 
 		// ── Write index page ────────────────────────────────────────────────────
-		const indexHtml = buildIndexPage(indexEntries, { sidebarEntries, customCss: profile.customCss });
+		const indexHtml = buildIndexPage(indexEntries, { sidebarEntries, customCss: profile.customCss, locale });
 		await vault.adapter.write(
 			normalizePath(`${outputFolder}/index.html`),
 			indexHtml
@@ -580,6 +687,22 @@ export default class PlayerVaultPlugin extends Plugin {
 		};
 		await vault.adapter.write(
 			normalizePath(`${outputFolder}/_export-manifest.json`),
-			JSON.stringify(manifest, null, "	")
-		);	}
+			JSON.stringify(manifest, null, "\t")
+		);
+
+		// ── Write incremental cache ───────────────────────────────────────────
+		if (profile.incrementalExport) {
+			const newCache: ExportCache = {
+				version: 2,
+				noteCount: survivingNotes.size,
+				entries: Object.fromEntries(
+					[...survivingNotes.values()].map(({ file }) => [file.path, file.stat.mtime])
+				),
+			};
+			await vault.adapter.write(
+				normalizePath(`${outputFolder}/.pv-cache.json`),
+				JSON.stringify(newCache, null, "\t")
+			);
+		}
+	}
 }

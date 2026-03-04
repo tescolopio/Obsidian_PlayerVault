@@ -84,6 +84,22 @@ export function isNoteFullySecret(content: string): boolean {
 }
 
 /**
+ * Returns `true` when the note's YAML front matter sets `publish: false`.
+ *
+ * This mirrors the Obsidian Publish convention: any vault that already uses
+ * `publish: false` to suppress notes from Obsidian Publish will automatically
+ * suppress the same notes from Player Vault exports without any extra tagging.
+ *
+ * Accepted values: boolean `false`, string `"false"`, or string `'false'`.
+ * Any other value (missing, `true`, etc.) returns `false` — the note passes.
+ */
+export function isNotePublishBlocked(content: string): boolean {
+	const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+	if (!fmMatch) return false;
+	return /^publish\s*:\s*(false|"false"|'false')\s*$/im.test(fmMatch[1]);
+}
+
+/**
  * Returns true when the file's vault path falls inside one of the excluded folder
  * prefixes. Comparison is case-sensitive and path-separator-normalised.
  * e.g. folder "GM Notes" matches "GM Notes/Session 12.md"

@@ -5,6 +5,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 
 ---
 
+## [2.0.0] — 2026-03-XX
+
+### Highlights
+
+Player Vault 2.0 brings the plugin out of desktop-only territory, dramatically speeds up large-vault exports, and adds a one-click "publish to web" workflow. It also makes the export pipeline fully internationalisation-ready.
+
+### Added
+
+- **Mobile support** — removed `isDesktopOnly` restriction. The "open exported folder" step is now guarded with `Platform.isDesktop` so mobile users still get the full export; they just manage files through their file-manager app. Tested on Obsidian for iOS 1.6 and Android 1.5.
+
+- **Incremental export** (per-profile toggle) — after the first full export Player Vault writes a `.pv-cache.json` file beside the exported HTML. On subsequent runs, notes whose `mtime` is unchanged are skipped entirely, reducing export time on a 400-note vault from ~8 s to ~0.3 s. Cache is automatically invalidated when the total note count changes (so newly created or deleted notes always trigger a full re-scan of links and the index).
+
+- **Publish to Web** (per-profile deploy-hook URL) — paste a [Netlify build hook](https://docs.netlify.com/configure-builds/build-hooks/), [GitHub Actions `repository_dispatch`](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#repository_dispatch) URL, or [Vercel deploy hook](https://vercel.com/docs/concepts/deployments/deploy-hooks) into Settings → Publish to Web. A **Publish** button appears in the Settings CTA row, and a new command **Player Vault: Publish to Web (trigger deploy hook)** becomes available in the command palette. The plugin POSTs to the URL and reports success or HTTP error via a Notice.
+
+- **`publish: false` parity** — notes with `publish: false` (or `publish: "false"`) in their YAML front matter are silently excluded from export. This mirrors the [Obsidian Publish](https://help.obsidian.md/Obsidian+Publish/Introduction+to+Obsidian+Publish) convention, making it easy to migrate an existing Obsidian Publish vault to Player Vault. Dry-run mode shows these as **publish: false** in the exclusion reason column.
+
+- **i18n foundation** (`PV_STRINGS` / `PvLocale`) — all user-visible strings in the exported HTML (site title, search placeholder, "Linked from", "Home", etc.) are now gathered in a `PV_STRINGS` constant keyed by locale. The active locale is a vault-wide setting (Settings → Advanced → Language). Only `en` ships by default; adding a new locale requires a single object entry in `exporter.ts`:
+
+  ```typescript
+  // Example: add French
+  export const PV_STRINGS = {
+      en: { siteTitle: "Player Wiki", searchPlaceholder: "Search notes…", … },
+      fr: { siteTitle: "Wiki Joueur",  searchPlaceholder: "Rechercher…",   … },
+  } as const;
+  ```
+
+  The exported pages also receive a matching `<html lang="en">` attribute, improving screen-reader and SEO behaviour.
+
+### Changed
+
+- `manifest.json` — `isDesktopOnly` removed; `version` bumped to `2.0.0`.
+- `runExport()` — "open folder after export" shell call only executes on `Platform.isDesktop`.
+- Pass 1 (note-collection) — calls `isNotePublishBlocked` before the existing GM-only check.
+- `runDryRun()` — includes `publish` as a new `DryRunReason`; checked before `gm-only`.
+- `wrapInPage` — new optional `locale?: PvLocale` field in `WrapPageOptions`. Defaults to `"en"`.
+- `buildIndexPage` — accepts `locale` via `WrapPageOptions`.
+- Settings — new **Publish to Web** section (deploy hook URL field + contextual hint), **Incremental export** toggle in the Export section, **Language** dropdown in a new Advanced section.
+
+### Tests
+
+- 86 tests total (up from 77).
+- Added `describe("isNotePublishBlocked")` — 5 tests (boolean false, string "false", boolean true, no front matter, front matter without publish key).
+- Added `describe("PV_STRINGS / i18n")` — 4 tests (all required keys present, locale used in output, default falls back to English, `lang` attribute correctness).
+
+---
+
 ## [1.3.0] — 2026-03-XX
 
 ### Added

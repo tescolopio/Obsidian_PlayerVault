@@ -19,8 +19,20 @@ export interface ExportProfile {
 	extraSecretPatterns: string[];
 	/** Strip ALL %% … %% blocks, not just %%SECRET%%/%%GM%% ones */
 	stripAllComments: boolean;
-	/** Extra CSS appended to the exported styles.css for this profile */
+	/** Extra CSS appended to the exported stylesheet for this profile */
 	customCss: string;
+	/**
+	 * When true, only notes whose vault mtime has changed since the previous
+	 * export are re-converted and written. Unchanged notes are skipped for
+	 * speed. Automatically invalidated if the surviving-note count changes.
+	 */
+	incrementalExport: boolean;
+	/**
+	 * Webhook URL to POST to after a successful export
+	 * (e.g. a Netlify build hook or GitHub Actions `workflow_dispatch` URL).
+	 * Leave blank to disable the "Publish to Web" button.
+	 */
+	deployHookUrl: string;
 }
 
 /** Settings persisted in data.json */
@@ -31,6 +43,11 @@ export interface PlayerVaultSettings {
 	openAfterExport: boolean;
 	/** Whether the user has already seen the first-run welcome wizard */
 	hasSeenWelcome: boolean;
+	/**
+	 * BCP-47 locale code used in the exported wiki chrome (headings, aria labels, etc.).
+	 * Only "en" ships with v2.0; the field is reserved for future locales.
+	 */
+	locale: string;
 }
 
 export const DEFAULT_PROFILE: ExportProfile = {
@@ -42,6 +59,8 @@ export const DEFAULT_PROFILE: ExportProfile = {
 	extraSecretPatterns: [],
 	stripAllComments: false,
 	customCss: "",
+	incrementalExport: false,
+	deployHookUrl: "",
 };
 
 export const DEFAULT_SETTINGS: PlayerVaultSettings = {
@@ -49,6 +68,7 @@ export const DEFAULT_SETTINGS: PlayerVaultSettings = {
 	activeProfileId: "default",
 	openAfterExport: false,
 	hasSeenWelcome: false,
+	locale: "en",
 };
 
 /** Return the active profile, falling back to the first profile or a default. */
@@ -113,6 +133,10 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 		exportBtn.addEventListener("click", () => this.plugin.runExport());
 		const dryRunBtn = exportRow.createEl("button", { cls: "pv-export-btn", text: "🐾  Dry Run" });
 		dryRunBtn.addEventListener("click", () => this.plugin.runDryRun());
+		const publishBtn = exportRow.createEl("button", { cls: "pv-export-btn pv-publish-btn", text: "🌐  Publish" });
+		publishBtn.title = "POST to your deploy hook URL (Settings → Publish to Web)";
+		publishBtn.disabled = !profile.deployHookUrl.trim();
+		publishBtn.addEventListener("click", () => this.plugin.runPublish());
 		this.exportHintEl = exportRow.createEl("span", {
 			cls: "pv-export-hint",
 			text: `Profile: ${profile.name} → ${profile.outputFolder}/`,
@@ -215,6 +239,19 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 				})
 			);
 
+		new Setting(containerEl)
+			.setName("Incremental export")
+			.setDesc(
+				"Speed up large vaults — skip notes that have not changed since the last export. " +
+				"The cache is automatically invalidated if the exported note set grows or shrinks."
+			)
+			.addToggle((t) =>
+				t.setValue(profile.incrementalExport).onChange(async (v) => {
+					profile.incrementalExport = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
 		// ══════════════════════════════════════════════════════════════════
 		// Section: Content Filtering
 		// ══════════════════════════════════════════════════════════════════
@@ -278,7 +315,6 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 		// Section: Appearance
 		// ══════════════════════════════════════════════════════════════════
 		this.sectionHeader(containerEl, "Appearance", "palette");
-
 		const cssLabel = containerEl.createEl("div", { cls: "pv-pattern-label" });
 		cssLabel.createEl("span", { cls: "pv-pattern-label-name", text: "Custom CSS" });
 		cssLabel.createEl("span", {
@@ -295,6 +331,58 @@ export class PlayerVaultSettingTab extends PluginSettingTab {
 			profile.customCss = cssArea.value;
 			await this.plugin.saveSettings();
 		});
+
+		// ══════════════════════════════════════════════════════════════════
+		// Section: Publish to Web
+		// ══════════════════════════════════════════════════════════════════
+		this.sectionHeader(containerEl, "Publish to Web", "globe");
+
+		new Setting(containerEl)
+			.setName("Deploy hook URL")
+			.setDesc(
+				"After a successful export, click 🌐 Publish to POST to this URL. " +
+				"Works with Netlify build hooks, GitHub Actions workflow_dispatch webhooks, " +
+				"or any service that triggers a deploy on POST. " +
+				"Leave blank to disable the Publish button."
+			)
+			.addText((text) => {
+				text.inputEl.style.width = "100%";
+				text
+					.setPlaceholder("https://api.netlify.com/build_hooks/…")
+					.setValue(profile.deployHookUrl)
+					.onChange(async (v) => {
+						profile.deployHookUrl = v.trim();
+						await this.plugin.saveSettings();
+						publishBtn.disabled = !profile.deployHookUrl.trim();
+					});
+			});
+
+		containerEl.createEl("div", {
+			cls: "pv-deploy-hint",
+			text:
+				"💡 Netlify: Sites → Site settings → Build hooks → Add hook → copy URL. " +
+				"GitHub Pages: Create a workflow_dispatch webhook in your repo's GitHub Actions.",
+		});
+
+		// ══════════════════════════════════════════════════════════════════
+		// Section: Advanced
+		// ══════════════════════════════════════════════════════════════════
+		this.sectionHeader(containerEl, "Advanced", "settings");
+
+		new Setting(containerEl)
+			.setName("Wiki locale")
+			.setDesc(
+				"Language used for chrome text in the exported wiki (headings, aria labels, search placeholder). " +
+				"Only English ships with v2.0; more locales can be requested on GitHub."
+			)
+			.addDropdown((dd) => {
+				dd.addOption("en", "English (en)");
+				dd.setValue(this.plugin.settings.locale ?? "en");
+				dd.onChange(async (v) => {
+					this.plugin.settings.locale = v;
+					await this.plugin.saveSettings();
+				});
+			});
 
 		// ══════════════════════════════════════════════════════════════════
 		// Section: Help

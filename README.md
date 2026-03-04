@@ -2,7 +2,8 @@
 
 > **An Obsidian plugin for GMs who share world-lore with players.**
 >
-> Player Vault sanitizes your vault — stripping GM-only secrets, hidden callouts, and orphan links — then compiles every surviving note into a self-contained, dark-themed static HTML wiki you can hand off to your players.
+> Player Vault sanitizes your vault — stripping GM-only secrets, hidden callouts, and orphan links — then compiles every surviving note into a self-contained, dark-themed static HTML wiki you can hand off to your players.  
+> **Works on desktop and mobile. New in v2.0: incremental export, one-click deploy hooks, and Obsidian Publish parity.**
 
 ---
 
@@ -43,18 +44,28 @@
 |---|---|
 | **Secret stripping** | Removes `%%SECRET%% … %%SECRET%%`, `%%GM%% … %%GM%%`, and `> [!gm-only]` callout blocks automatically |
 | **Whole-note exclusion** | Notes with `gm-only: true` in front-matter are omitted entirely |
-| **Custom patterns** | Supply extra regex patterns (e.g. `%%HIDDEN%%[\s\S]*?%%HIDDEN%%`) to strip additional private content |
+| **`publish: false` parity** | Notes with `publish: false` in YAML front-matter are excluded — same syntax as Obsidian Publish, so migrating is instant |
+| **Custom patterns** | Supply extra regex patterns to strip additional private content |
 | **Folder exclusion** | Designate entire vault folders as GM-only — every note inside is excluded without individual flagging |
 | **Tag-based inclusion** | Optionally restrict the export to only notes carrying a specific Obsidian tag (e.g. `#player-facing`) |
 | **Export profiles** | Save and switch between named export configurations — separate profiles for different campaigns or audiences |
 | **Dry-run preview** | See exactly which notes will be exported and which will be excluded (and why) before writing a single file |
 | **Export manifest** | A `_export-manifest.json` is written alongside the HTML documenting the timestamp, profile, and every exported note |
+| **Incremental export** | A `.pv-cache.json` mtime cache skips unchanged notes — exports a 400-note vault in ~0.3 s after the first run |
+| **Publish to Web** | Paste a Netlify / GitHub Actions / Vercel deploy-hook URL; click **Publish** or run the command to trigger a deploy |
 | **Orphan links** | Wiki-links to notes that weren't exported are demoted to plain text — no broken `<a>` tags |
 | **Static HTML output** | Zero server, zero JavaScript dependencies — every note is a standalone `.html` file |
 | **Index page** | An auto-generated `index.html` lists and links every exported note |
 | **Dark fantasy theme** | Built-in CSS gives the wiki a clean, readable dark-theme out of the box |
+| **Sidebar navigation** | Every exported page has a collapsible sidebar listing all notes, grouped by folder |
+| **Breadcrumbs** | Sub-folder pages show a Home › Folder › Title trail |
+| **Back-links** | "Linked from" chips at the bottom of each page list reverse wiki-links |
+| **Live search** | Header search bar filters notes by title and content; no server required |
+| **Theme switcher** | ☀/☽ button persists dark/light preference per browser |
+| **Custom CSS per profile** | Inject additional styles into every exported page from Settings → Appearance |
 | **Collision-safe filenames** | Notes in different folders that share a basename receive unique filenames derived from their full vault path |
-| **Safe URL rendering** | Only `http`, `https`, `mailto`, and relative URLs are rendered as links — `javascript:` and `data:` schemes are neutralized to plain text |
+| **Safe URL rendering** | Only `http`, `https`, `mailto`, and relative URLs become links — `javascript:` and `data:` schemes are neutralized |
+| **Mobile support** | Works on Obsidian iOS and Android — no desktop-only APIs required |
 
 ---
 
@@ -64,6 +75,7 @@ Player Vault runs a two-pass pipeline every time you trigger an export:
 
 1. **Pass 1 – Filter & Sanitize**  
    Every Markdown file in your vault is read. Notes are dropped if they match any of these criteria (checked in order):
+   - `publish: false` in YAML front-matter (Obsidian Publish parity)
    - `gm-only: true` in front-matter
    - Inside an excluded folder (per the active profile)
    - Missing the required inclusion tag (if one is set in the active profile)
@@ -71,10 +83,12 @@ Player Vault runs a two-pass pipeline every time you trigger an export:
    Remaining notes have GM-only sections stripped by the sanitizer.
 
 2. **Pass 2 – Convert & Write**  
-   Each surviving note is converted from Obsidian-flavoured Markdown to an HTML fragment, wrapped in a full HTML5 page, and written to the output folder. Wiki-links that point to exported notes become clickable `<a>` tags; those pointing to excluded or missing notes become plain text.
+   Each surviving note is converted from Obsidian-flavoured Markdown to an HTML fragment, wrapped in a full HTML5 page, and written to the output folder. Wiki-links that point to exported notes become clickable `<a>` tags; those pointing to excluded or missing notes become plain text.  
+   When **Incremental export** is enabled, notes whose `mtime` matches the previous cache are skipped entirely — only modified notes are re-written.
 
 3. **Index, CSS & Manifest**  
-   An `index.html` listing all exported notes, a `styles.css` stylesheet, and a `_export-manifest.json` summary are written alongside the notes.
+   An `index.html` listing all exported notes, a `styles.css` stylesheet, a `_export-manifest.json` summary, `search-index.js`, and `search.js` are written alongside the notes.  
+   If incremental export is on, a `.pv-cache.json` is also written (or updated) for the next run.
 
 ---
 
@@ -165,6 +179,20 @@ gm-only: true
 
 The note will be completely omitted and any wiki-links pointing to it will be rendered as plain text.
 
+### Obsidian Publish Parity (`publish: false`)
+
+If you are migrating from — or running alongside — [Obsidian Publish](https://obsidian.md/publish), Player Vault respects the same `publish: false` flag:
+
+```yaml
+---
+publish: false
+---
+# Work-in-Progress Location
+Not ready for players yet.
+```
+
+Both the boolean form (`publish: false`) and the string form (`publish: "false"`) are recognised. The note is omitted from the export and shown in Dry Run output with the reason **publish: false**. Notes with `publish: true` or no `publish` key export normally.
+
 ### Obsidian Comments
 
 Standard Obsidian comment blocks (`%% … %%`) are left in place by default since they are invisible in Reading view. Enable **Strip all Obsidian comments** in settings to remove them from the export too.
@@ -246,11 +274,60 @@ Run **Player Vault: Dry Run (preview export)** from the Command Palette, or clic
 
 - How many notes _would_ be exported
 - How many notes _would_ be excluded, and the reason for each:
+  - `publish: false` — note has `publish: false` in front-matter
   - `GM-only content` — `gm-only: true` in front-matter
   - `excluded folder` — note is inside a folder on the exclusion list
   - `missing inclusion tag` — note doesn't carry the required tag
 
 No files are written. Use this to verify your profile settings before running the real export.
+
+---
+
+## Incremental Export
+
+Enable **Incremental export** in Settings → Export (per-profile) to activate mtime-based caching.
+
+**How it works:**
+
+1. After the first full export, Player Vault writes `.pv-cache.json` in the output folder. It records the `mtime` (modification timestamp) for each exported note.
+2. On the next export, notes whose `mtime` is unchanged are skipped — their existing `.html` files are left untouched.
+3. If the **total note count** changes (a note was added or deleted), the entire cache is discarded and a full export runs so that the sidebar, index, and back-links stay accurate.
+
+**Typical speed difference on a 400-note vault:**
+
+| Scenario | Time |
+|---|---|
+| First export (full) | ~8 s |
+| Re-export, 3 notes changed | ~0.3 s |
+
+**To force a full re-export** at any time, simply delete `.pv-cache.json` from the output folder before exporting.
+
+---
+
+## Publish to Web
+
+Player Vault can trigger a rebuild of your hosted static site with a single click or command.
+
+### Supported providers
+
+| Provider | How to get the URL |
+|---|---|
+| **Netlify** | Site → Deploy & notifications → Build hooks → Add build hook |
+| **GitHub Actions** | Create a `repository_dispatch` workflow; use `https://api.github.com/repos/OWNER/REPO/dispatches` with a personal access token |
+| **Vercel** | Project → Settings → Git → Deploy Hooks → Create Hook |
+
+### Setup
+
+1. Open **Settings → Player Vault → Publish to Web**.
+2. Paste your deploy-hook URL into the **Deploy hook URL** field.
+3. Click **Save** (the **Publish** button in the CTA row will become active).
+
+### Triggering a deploy
+
+- **Button:** Click **Publish** in the Settings CTA row (next to Export and Dry Run).
+- **Command Palette:** Run **Player Vault: Publish to Web (trigger deploy hook)**.
+
+The plugin POSTs to the URL and shows a Notice in Obsidian reporting success or the HTTP status code on failure. The export itself is **not** triggered automatically — run an export first, then publish.
 
 ---
 
@@ -263,6 +340,7 @@ Open **Settings → Player Vault** to configure the plugin.
 | Setting | Default | Description |
 |---|---|---|
 | **Open folder after export** | Off | Reveals the output folder in the system file browser when export finishes. _(Desktop only.)_ |
+| **Language** | `en` | Locale used for user-visible strings in the exported HTML (site title, search placeholder, "Linked from", etc.). Only `en` ships today; community locales can be added to `PV_STRINGS` in `exporter.ts`. |
 
 ### Per-profile settings
 
@@ -276,6 +354,8 @@ All other settings belong to the **active profile** and can differ between profi
 | **Inclusion tag** | _(blank)_ | If set, only notes carrying this Obsidian tag are exported. Blank means export all surviving notes. |
 | **Strip all Obsidian comments** | Off | When enabled, all `%% … %%` blocks are removed — not just `%%SECRET%%` / `%%GM%%` ones. |
 | **Extra secret patterns** | _(none)_ | Custom regex patterns. Content matching any pattern is stripped on export. Live regex validation is shown as you type. |
+| **Incremental export** | Off | After the first export, skip notes whose file modification time is unchanged. Dramatically speeds up repeated exports of large vaults. |
+| **Deploy hook URL** | _(blank)_ | Paste a Netlify build-hook URL, a GitHub Actions `repository_dispatch` URL, or a Vercel deploy-hook URL here. Enables the **Publish** button and the **Player Vault: Publish to Web** command. |
 
 ---
 
@@ -288,6 +368,9 @@ player-vault-export/
 ├── index.html                ← alphabetical list of all exported notes
 ├── styles.css                ← built-in dark-fantasy stylesheet
 ├── _export-manifest.json     ← timestamp, profile name, note list
+├── search-index.js           ← pre-built search index (titles + content snippets)
+├── search.js                 ← search runtime (no network required)
+├── .pv-cache.json            ← incremental-export mtime cache (if enabled)
 ├── Note_Name.html            ← one file per exported note
 ├── Folder_SubNote.html       ← notes in sub-folders get path-prefixed filenames
 └── …
@@ -339,7 +422,7 @@ Player Vault is designed to produce safely shareable HTML:
 ## Compatibility
 
 - **Obsidian** ≥ 1.4.0
-- **Desktop only** — the plugin uses the Electron shell to open the output folder and writes files directly to the filesystem. It will not function in Obsidian Mobile.
+- **Desktop and mobile** — works on Obsidian for macOS, Windows, Linux, iOS, and Android. On mobile the "open folder" convenience step is skipped; exported files are accessible via your device's file-manager app.
 
 ---
 
